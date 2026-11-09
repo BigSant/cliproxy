@@ -384,6 +384,19 @@ class TrafficTest extends WebTestCase
         ]], '{"type":"message","content":[],"usage":{}}'));
         self::getContainer()->get(TrafficIngester::class)->ingest();
         self::assertSame('Paleisk build', $this->entityManager->getRepository(Exchange::class)->findOneBy(['requestTail' => 'cccc2222'])->prompt);
+
+        // A delegated agent's brief and its result coming back are not the person's prompts.
+        foreach (['dddd1111' => "Act as the research sub-agent for this task.\n\nUžkrauk delfi.lt", 'dddd2222' => 'Delegated task node:abc (Delfi – Opus) [completed]:\nPirmas įrašas…', 'dddd3333' => 'Ačiū'] as $tail => $text) {
+            $this->write("v1-messages-2026-11-09T150002-$tail.log", RequestLogs::file('/v1/messages', ['model' => 'claude-fable-5-1', 'messages' => [
+                ['role' => 'user', 'content' => [['type' => 'text', 'text' => $text]]],
+            ]], '{"type":"message","content":[],"usage":{}}'));
+        }
+        self::getContainer()->get(TrafficIngester::class)->ingest();
+        $kinds = [];
+        foreach (['dddd1111', 'dddd2222', 'dddd3333'] as $tail) {
+            $kinds[] = $this->entityManager->getRepository(Exchange::class)->findOneBy(['requestTail' => $tail])->promptKind;
+        }
+        self::assertSame(['agent', 'agent', 'user'], $kinds);
         self::assertSame('Paleisk', \App\Traffic\Turn::cleanPrompt("# AGENTS.md instructions for /home/x\n\n<INSTRUCTIONS>\n# Taisyklės\n</INSTRUCTIONS>\n\nPaleisk"), 'Codex\'s AGENTS.md');
     }
 

@@ -9,6 +9,8 @@ namespace App\Traffic;
 final class Turn
 {
     public const string PROMPT_USER = 'user';
+    /** Written by an agent, not the person: a delegated task's brief, its result coming back, a background notice. */
+    public const string PROMPT_AGENT = 'agent';
     public const string PROMPT_TOOL_RESULTS = 'tool_results';
     public const string PROMPT_NONE = 'none';
 
@@ -74,6 +76,15 @@ final class Turn
     }
 
     /** A person's text without what the client injected into it. */
+    /** What a client's sub-agents and background work send as the "user": T3 Code's briefs and results, Claude Code's notices. */
+    private const string AGENT_PROMPT = '/^\s*(Act as the [\w -]+ sub-?agent for this task\.|Delegated task \S+ \(.*?\) \[\w+\]:|<task-notification>)/';
+
+    /** A prompt's author: the person, or an agent speaking for them. */
+    public static function promptKindOf(string $prompt): string
+    {
+        return '' === $prompt ? self::PROMPT_NONE : (1 === preg_match(self::AGENT_PROMPT, $prompt) ? self::PROMPT_AGENT : self::PROMPT_USER);
+    }
+
     public static function cleanPrompt(string $text): string
     {
         return trim(preg_replace(self::INJECTED, '', $text) ?? $text);

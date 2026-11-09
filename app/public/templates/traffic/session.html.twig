@@ -15,13 +15,14 @@
     </div>
     <ol class="timeline">
         {% for exchange in exchanges %}
-            <li class="{{ exchange.promptKind == 'user' ? 'is-prompt' }} {{ exchange.failed ? 'is-failed' }}">
+            <li class="{{ exchange.promptKind in ['user', 'agent'] ? 'is-prompt' }} {{ exchange.failed ? 'is-failed' }}">
                 <div class="timeline-meta">
                     <a href="{{ path('app_traffic_show', {id: exchange.id}) }}">{{ exchange.occurredAt|date('H:i:s') }}</a>
                     {% include 'traffic/_status.html.twig' %}
                     <span class="muted small">{{ exchange.model }}{{ exchange.reasoningEffort ? ' ' ~ exchange.reasoningEffort }} · {{ (exchange.durationMs / 1000)|number_format(1, ',') }} s · {{ exchange.outputTokens|tokens }} išv.</span>
                 </div>
                 {% if exchange.promptKind == 'user' %}<div class="bubble bubble-user">{{ exchange.prompt|u.truncate(600, '…') }}</div>{% endif %}
+                {% if exchange.promptKind == 'agent' %}<div class="bubble bubble-agent"><span class="kind kind-agent">agentas</span> {{ exchange.prompt|u.truncate(600, '…') }}</div>{% endif %}
                 {% if exchange.toolErrorCount %}<div class="bad small">{{ exchange.toolErrorCount }} įrankių rezultatai su klaida</div>{% endif %}
                 {% if exchange.thinking %}<div class="bubble bubble-think">{{ exchange.thinking|u.truncate(300, '…') }}</div>{% endif %}
                 {% if exchange.answer %}<div class="bubble">{{ exchange.answer|u.truncate(600, '…') }}</div>{% endif %}

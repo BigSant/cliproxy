@@ -2,9 +2,11 @@
 {% if exchange.failed %}
     <span class="tag tag-bad" title="{{ exchange.error }}">HTTP {{ exchange.statusCode ?: '–' }}</span>
 {% elseif exchange.stopReason in ['tool_use'] or exchange.toolCallCount > 0 %}
-    <span class="tag tag-info">įrankiai</span>
+    <span class="tag tag-info" title="Modelis atsakė įrankio kvietimu ({{ exchange.stopReason ?: 'tool_use' }}); darbas tęsiasi kitoje užklausoje">kviečia įrankį</span>
 {% elseif exchange.stopReason in ['max_tokens', 'incomplete: max_output_tokens'] %}
     <span class="tag tag-warn">nukirsta</span>
+{% elseif exchange.stopReason in ['end_turn', 'completed', 'stop_sequence'] %}
+    <span class="tag tag-ok" title="Galutinis atsakymas ({{ exchange.stopReason }})">atsakė</span>
 {% else %}
     <span class="tag tag-ok">{{ exchange.stopReason ?: 'ok' }}</span>
 {% endif %}
