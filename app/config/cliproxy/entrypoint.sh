@@ -14,6 +14,14 @@ if [ ! -s "$state/config.yaml" ]; then
     mv "$state/config.yaml.new" "$state/config.yaml"
     echo "Wrote $state/config.yaml from the template"
 fi
-# CLIProxyAPI writes logs/ in its working directory: the traffic directory, which the collector reads.
+# CLIProxyAPI writes main.log to logs/ of its working directory and the request logs to logs/ beside config.yaml. Both
+# go to the traffic directory, which the collector reads: the state directory's logs/ becomes a link to it (its old
+# files move along).
+traffic=/CLIProxyAPI/traffic/logs
+if [ -d "$state/logs" ] && [ ! -L "$state/logs" ]; then
+    find "$state/logs" -mindepth 1 -maxdepth 1 -type f -exec mv -f {} "$traffic/" \;
+    rmdir "$state/logs"
+fi
+ln -sfn "$traffic" "$state/logs"
 cd /CLIProxyAPI/traffic
 exec /CLIProxyAPI/CLIProxyAPI -config "$state/config.yaml"
