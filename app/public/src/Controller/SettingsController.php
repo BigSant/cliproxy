@@ -2,10 +2,12 @@
 
 namespace App\Controller;
 
+use App\CliProxy\ClaudeCodeVersion;
 use App\CliProxy\ConfigBaseline;
 use App\CliProxy\ConfigConflictException;
 use App\CliProxy\ManagementClient;
 use App\CliProxy\ManagementException;
+use App\Repository\UsageRecordRepository;
 use App\Settings\Settings;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\RedirectResponse;
@@ -32,6 +34,7 @@ class SettingsController extends AbstractController
         private readonly ManagementClient $client,
         private readonly Settings $settings,
         private readonly TranslatorInterface $translator,
+        private readonly UsageRecordRepository $usage,
     ) {
     }
 
@@ -66,6 +69,9 @@ class SettingsController extends AbstractController
             'yaml' => $yaml,
             'etag' => $etag,
             'ntfyUrl' => (string) ($this->settings->get(Settings::NTFY_URL) ?? ''),
+            'claudeUserAgent' => ClaudeCodeVersion::configured($config),
+            'claudeSeen' => $this->usage->newestClaudeCodeVersion(),
+            'claudePath' => ClaudeCodeVersion::PATH,
         ]);
     }
 

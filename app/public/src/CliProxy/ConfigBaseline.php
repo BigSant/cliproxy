@@ -2,6 +2,7 @@
 
 namespace App\CliProxy;
 
+use App\Repository\UsageRecordRepository;
 use App\Settings\Settings;
 
 /**
@@ -9,7 +10,8 @@ use App\Settings\Settings;
  * empty state directory, so a change to it never reaches an existing hub):
  * - ALWAYS: the data policy – usage records queued for the collector, log files never deleted by CLIProxyAPI;
  * - ONCE (then the person's own choice in Nustatymai or config.yaml): a session moves to another account only when its
- *   own account runs out of quota, and a Claude model's quota cools down only that model, not the whole account.
+ *   own account runs out of quota, and a Claude model's quota cools down only that model, not the whole account;
+ * - the Claude Code version CLIProxyAPI presents, kept at the newest client the hub has seen (ClaudeCodeVersion).
  */
 class ConfigBaseline
 {
@@ -29,6 +31,7 @@ class ConfigBaseline
     public function __construct(
         private readonly ManagementClient $client,
         private readonly Settings $settings,
+        private readonly UsageRecordRepository $usage,
     ) {
     }
 
@@ -43,6 +46,10 @@ class ConfigBaseline
         $once = $this->settings->get(Settings::CONFIG_BASELINE) !== self::VERSION;
         if ($once) {
             $patch = array_replace_recursive($patch, self::missing($config, self::ONCE));
+        }
+        $agent = ClaudeCodeVersion::raise(ClaudeCodeVersion::configured($config), $this->usage->newestClaudeCodeVersion());
+        if (null !== $agent) {
+            $patch = array_replace_recursive($patch, ['upstream' => ['claude' => ['header-defaults' => ['user-agent' => $agent]]]]);
         }
         if ([] !== $patch) {
             $this->client->patchConfig($patch);

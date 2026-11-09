@@ -34,7 +34,11 @@ Symfony 8.1 skydelis.
 - **Konfigūracijos bazė** (`src/CliProxy/ConfigBaseline.php`): kadangi šablonas esamo failo nebepasiekia, kolektorius
   kiekvieną paleidimą per management API užtikrina duomenų politiką (`usage-statistics-enabled`, eilės 1 h,
   `logs-max-total-size-mb: 0`, `error-logs-max-files: 0`), o vieną kartą – `session-affinity-rebind-on: quota` ir
-  `upstream.claude.model-level-cooling: true` (toliau – tavo pasirinkimas).
+  `upstream.claude.model-level-cooling: true` (toliau – tavo pasirinkimas). Be to, Claude Code versiją, kuria
+  CLIProxyAPI prisistato Anthropic'ui (`upstream.claude.header-defaults.user-agent`), ji laiko ne žemesnę už naujausią
+  klientą iš `usage_record` (paskutinės 2000 Claude užklausų): CLIProxyAPI numatytoji – jo paskutinė išmatuota (v8.0.62 –
+  2.1.280), o Anthropic naujiems modeliams reikalauja naujesnės („Claude Code 2.1.280 does not support this model“).
+  Tik kelia, niekada nemažina; Nustatymai → Claude Code versija rodo, kas siunčiama.
 - **`CLIPROXY_CONFIG_REV`** (`env/common.env`) – `entrypoint.sh` maiša; ji yra konteinerio aplinkoje, todėl pakeitus
   `entrypoint.sh` deploy'us konteinerį perkuria. Šablonas į maišą neįeina: jis veikia tik tuščią katalogą, o be reikalo
   perkurtas CLIProxyAPI nutrauktų vykstančias sesijas. CI (`checks.yml`, lint) atmeta pasenusią reikšmę.

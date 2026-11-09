@@ -44,6 +44,13 @@
         </form>
     </section>
 
+    <section class="card" id="claude-code">
+        <h2>{{ 'settings.claude_code'|trans }}</h2>
+        <p>{{ 'settings.claude_code_sent'|trans }} <code>{{ claudeUserAgent ?? 'settings.claude_code_default'|trans }}</code></p>
+        <p>{{ 'settings.claude_code_seen'|trans }} {% if claudeSeen %}<code>{{ claudeSeen }}</code>{% else %}<span class="muted">{{ 'settings.claude_code_none'|trans }}</span>{% endif %}</p>
+        <p class="muted small">{{ 'settings.claude_code_explain_html'|trans({'%path%': claudePath|e})|raw }}</p>
+    </section>
+
     <section class="card">
         <h2>{{ 'settings.traffic'|trans }}</h2>
         <p class="muted">{{ 'settings.traffic_explain_html'|trans({'%journal_url%': path('app_traffic')|e})|raw }}</p>
