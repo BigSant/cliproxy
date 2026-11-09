@@ -60,6 +60,24 @@ class QuotaSnapshot
         return array_map(QuotaWindow::fromArray(...), $this->windows);
     }
 
+    /** This snapshot with the windows it lacks taken from $previous (the headers carry no Fable window, …). */
+    public function withMissingFrom(?self $previous): self
+    {
+        if (null === $previous) {
+            return $this;
+        }
+        $windows = [];
+        foreach ($this->windows() as $window) {
+            $windows[$window->key] = $window;
+        }
+        foreach ($previous->windows() as $window) {
+            $windows[$window->key] ??= $window;
+        }
+
+        return new self($this->authIndex, $this->account, $this->provider, $this->fetchedAt, array_values($windows), $this->source,
+            $this->plan ?? $previous->plan, $this->bankedResets ?? $previous->bankedResets, $this->error);
+    }
+
     public function window(string $key): ?QuotaWindow
     {
         foreach ($this->windows() as $window) {

@@ -44,6 +44,10 @@ class UsageRecord
     public string $nodeKind = '';
     #[ORM\Column(options: ['default' => false])]
     public bool $isCompaction = false;
+    /** Another attempt of a request whose previous attempt failed (a retry or a switch to another account): requests
+     * are the records minus these, and failed requests the failed records minus these. */
+    #[ORM\Column(options: ['default' => false])]
+    public bool $isRetry = false;
     /** @var array<string, mixed> */
     #[ORM\Column(type: Types::JSON, nullable: true)]
     public ?array $raw = null;
@@ -152,6 +156,31 @@ class UsageRecord
         $usage->raw = $record;
 
         return $usage;
+    }
+
+    /** Response headers worth keeping: limits, retries and request ids; not cookies or organisation ids. */
+    private const string KEPT_HEADERS = '/^(anthropic-ratelimit-|x-codex-|retry-after$|request-id$|x-request-id$|openai-request-id$|content-type$)/i';
+
+    /**
+     * What may be stored of a queue record: the client key only by its last four characters (CLIProxyAPI sends it
+     * whole), and only the response headers in KEPT_HEADERS. The spool and the database both get this, so the key
+     * of a record is the same on every path.
+     *
+     * @param array<string, mixed> $record
+     *
+     * @return array<string, mixed>
+     */
+    public static function sanitize(array $record): array
+    {
+        if (\is_string($record['api_key'] ?? null) && '' !== $record['api_key']) {
+            $record['api_key'] = '…'.substr($record['api_key'], -4);
+        }
+        if (\is_array($record['response_headers'] ?? null)) {
+            $record['response_headers'] = array_filter($record['response_headers'],
+                static fn ($name) => 1 === preg_match(self::KEPT_HEADERS, (string) $name), \ARRAY_FILTER_USE_KEY);
+        }
+
+        return $record;
     }
 
     /** @param array<string, mixed> $record */

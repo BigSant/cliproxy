@@ -45,7 +45,23 @@ class CollectCommand
         private readonly Settings $settings,
         private readonly ManagerRegistry $doctrine,
         private readonly ClockInterface $clock,
+        private readonly \App\Alert\Watchdog $watchdog,
+        private readonly \App\Repository\AlertRepository $alertRepository,
     ) {
+    }
+
+    /** The ntfy topic for the watchdog's file; the database may be the thing that is down, so it is kept. */
+    private ?string $ntfyUrlCache = null;
+
+    private function ntfyUrl(): ?string
+    {
+        try {
+            $url = $this->settings->get(Settings::NTFY_URL);
+            $this->ntfyUrlCache = \is_string($url) ? $url : '';
+        } catch (\Throwable) {
+        }
+
+        return $this->ntfyUrlCache;
     }
 
     public function __invoke(
@@ -54,52 +70,64 @@ class CollectCommand
         #[Option(description: 'Seconds between usage passes')] int $interval = 5,
         #[Option(description: 'Read every account\'s limits now')] bool $quotas = false,
     ): int {
-        $lock = $this->lockFactory->createLock('app-collect', ttl: max(60, $duration + 30));
+        // Five minutes, refreshed after every step: a slow step never lets a second collector in.
+        $lock = $this->lockFactory->createLock('app-collect', ttl: 300);
         if (!$lock->acquire()) {
             $io->writeln('Another collector is running.');
 
             return Command::SUCCESS;
         }
         $until = time() + $duration;
+        $step = function (string $name, callable $action) use ($lock) {
+            $this->step($name, $action);
+            $lock->refresh();
+        };
         try {
-            $this->step('config', fn () => $this->configBaseline->apply());
-            $this->step('version', fn () => $this->checkVersion());
+            $step('config', fn () => $this->configBaseline->apply());
+            $step('version', fn () => $this->checkVersion());
+            $step('quarantine', function () use ($io) {
+                if (true === $this->settings->get(Settings::QUARANTINE_RETRY_REQUESTED)) {
+                    $this->settings->set(Settings::QUARANTINE_RETRY_REQUESTED, false);
+                    $io->writeln(\sprintf('%d quarantined logs back in logs/.', $this->traffic->retryQuarantined()));
+                }
+            });
+            $step('orphans', fn () => $this->traffic->collectOrphans());
             do {
-                $this->step('usage', function () use ($io) {
+                $step('usage', function () use ($io) {
                     $stored = $this->collector->collectUsage();
                     if ($stored > 0) {
                         $io->writeln(\sprintf('Stored %d usage records.', $stored));
                     }
                 });
-                $this->step('traffic', function () use ($io) {
+                $step('traffic', function () use ($io) {
                     $logs = $this->collector->collectTraffic();
                     if ($logs > 0) {
                         $io->writeln(\sprintf('Took in %d request logs.', $logs));
                     }
                 });
-                $this->step('quotas', function () use ($io, &$quotas) {
+                $step('quotas', function () use ($io, &$quotas) {
                     if ($quotas || $this->collector->quotasDue()) {
                         $quotas = false;
                         $io->writeln(\sprintf('Read the limits of %d accounts.', $this->collector->refreshQuotas()));
                     }
                 });
-                $this->settings->markNow(Settings::COLLECTOR_HEARTBEAT, $this->clock->now());
-                $lock->refresh();
+                $step('heartbeat', fn () => $this->settings->markNow(Settings::COLLECTOR_HEARTBEAT, $this->clock->now()));
+                $this->watchdog->beat($this->ntfyUrl());
                 if (time() + $interval > $until) {
                     break;
                 }
                 sleep($interval);
             } while (true);
-            $this->step('link', fn () => $this->collector->linkTraffic());
-            $this->step('alerts', fn () => $this->raiseAlerts());
+            $step('link', fn () => $this->collector->linkTraffic());
+            $step('alerts', fn () => $this->raiseAlerts());
         } finally {
             $lock->release();
         }
-        foreach ($this->errors as $step => $error) {
-            $io->warning("$step: $error");
+        foreach ($this->errors as $name => $error) {
+            $io->warning("$name: $error");
         }
-        $this->settings->set(Settings::COLLECTOR_ERROR, [] === $this->errors ? '' : implode(' · ', array_map(
-            static fn (string $step, string $error) => "$step: $error", array_keys($this->errors), $this->errors)));
+        $this->step('status', fn () => $this->settings->set(Settings::COLLECTOR_ERROR, [] === $this->errors ? '' : implode(' · ', array_map(
+            static fn (string $name, string $error) => "$name: $error", array_keys($this->errors), $this->errors))));
 
         return [] === $this->errors ? Command::SUCCESS : Command::FAILURE;
     }
@@ -138,6 +166,12 @@ class CollectCommand
             $conditions += $this->alerts->accountConditions($this->client->accounts(), $this->snapshots->latest());
         } catch (\App\CliProxy\ManagementException $exception) {
             $conditions['cliproxy'] = ['level' => Alert::ERROR, 'message' => 'CLIProxyAPI neatsako: '.$exception->getMessage()];
+            // Without CLIProxyAPI the accounts are unknown, not fine: their open alerts stay as they are.
+            foreach ($this->alertRepository->open() as $alert) {
+                if (preg_match('/^(signin|account|pool):/', $alert->alertKey)) {
+                    $conditions[$alert->alertKey] = ['level' => $alert->level, 'message' => $alert->message];
+                }
+            }
         }
         if (isset($this->errors['usage']) && !isset($conditions['cliproxy'])) {
             $conditions['collector:usage'] = ['level' => Alert::WARNING, 'message' => 'Usage įrašų nepavyko įrašyti: '.$this->errors['usage'].' (jie saugūs spool\'e ir bus įrašyti vėliau).'];

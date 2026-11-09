@@ -5,7 +5,15 @@
 {% block body %}
     <div class="page-head">
         <div class="title-line"><h1>Įspėjimai</h1><span class="muted">{{ open|length }} aktyvūs</span></div>
-        <a class="button" href="{{ path('app_settings') }}#ntfy">Pranešimai į telefoną (ntfy)</a>
+        <div class="head-actions">
+            {% if open|filter(a => a.alertKey == 'traffic:quarantine')|length %}
+                <form method="post" action="{{ path('app_alerts_retry') }}">
+                    <input type="hidden" name="_token" value="{{ csrf_token('alerts') }}">
+                    <button class="button">Bandyti karantino failus dar kartą</button>
+                </form>
+            {% endif %}
+            <a class="button" href="{{ path('app_settings') }}#ntfy">Pranešimai į telefoną (ntfy)</a>
+        </div>
     </div>
     <section class="card">
         {% for alert in open %}

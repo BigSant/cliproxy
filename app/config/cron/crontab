@@ -2,4 +2,6 @@
 # limits every few minutes, and the soonest-reset-first priorities when they are on. One run lasts just under a minute.
 # 2G: a long session's request log holds its whole history (twice); the default 512M is not enough for those.
 * * * * * cd /var/www/html && php -d memory_limit=2G bin/console app:collect --duration=55
+# The watchdog does not depend on the collector, its lock or (for pushing) the database: README, "Įspėjimai".
+*/5 * * * * cd /var/www/html && php bin/console app:watchdog
 

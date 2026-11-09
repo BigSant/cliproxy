@@ -18,7 +18,7 @@ class AlertRepository extends ServiceEntityRepository
     public function open(): array
     {
         $alerts = $this->findBy(['resolvedAt' => null], ['lastSeenAt' => 'DESC']);
-        usort($alerts, static fn (Alert $a, Alert $b) => [Alert::ERROR !== $a->level, Alert::WARNING !== $a->level] <=> [Alert::ERROR !== $b->level, Alert::WARNING !== $b->level]);
+        usort($alerts, static fn (Alert $a, Alert $b) => [Alert::ERROR !== $a->level, Alert::WARNING !== $a->level, -$a->lastSeenAt->getTimestamp()] <=> [Alert::ERROR !== $b->level, Alert::WARNING !== $b->level, -$b->lastSeenAt->getTimestamp()]);
 
         return $alerts;
     }

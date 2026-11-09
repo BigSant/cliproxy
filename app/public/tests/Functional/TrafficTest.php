@@ -106,8 +106,11 @@ class TrafficTest extends WebTestCase
     public function testACodexWebsocketConnectionBecomesOneExchangePerTurn(): void
     {
         $this->write('v1-responses-2026-11-09T151000-wwww9999.log', RequestLogs::codexWebsocket());
-        $this->entityManager->persist(UsageRecord::fromQueueRecord(['timestamp' => '2026-11-09T13:00:04Z', 'request_id' => 'req-a', 'auth_index' => 'idx-c',
-            'source' => 'codex@example.com', 'session_id' => 'ws-session', 'provider' => 'codex', 'latency_ms' => 3500]));
+        // The connection's request id (the file name ends with it) on both turns' records; they come as each turn ends.
+        foreach ([['13:00:04', 'codex@example.com'], ['13:00:45', 'codex2@example.com']] as [$at, $account]) {
+            $this->entityManager->persist(UsageRecord::fromQueueRecord(['timestamp' => "2026-11-09T{$at}Z", 'request_id' => 'conn-wwww9999', 'auth_index' => 'idx-c',
+                'source' => $account, 'session_id' => 'ws-session', 'provider' => 'codex', 'latency_ms' => 3500]));
+        }
         $this->entityManager->flush();
 
         self::assertSame(1, self::getContainer()->get(TrafficIngester::class)->ingest());
@@ -118,8 +121,9 @@ class TrafficTest extends WebTestCase
         [$first, $second] = $turns;
         self::assertSame(['Paleisk testus', 'Paleisiu phpunit.', 'completed', 200, false], [$first->prompt, $first->thinking, $first->stopReason, $first->statusCode, $first->failed]);
         self::assertSame('ws-session', $first->sessionId);
-        self::assertSame('codex@example.com', $first->account, 'found by session and time');
-        self::assertSame(3500, $first->durationMs);
+        self::assertSame('codex@example.com', $first->account);
+        self::assertSame('codex2@example.com', $second->account, 'each turn its own record, in order');
+        self::assertSame(3500, $first->durationMs, 'the timeline\'s own duration, not the record\'s');
         self::assertSame('tool_results', $second->promptKind);
         self::assertSame('Vienas testas krenta.', $second->answer);
         $call = $this->entityManager->getRepository(ToolCall::class)->findOneBy(['callId' => 'call_ws1']);
@@ -139,19 +143,103 @@ class TrafficTest extends WebTestCase
         self::assertSame(1, $this->entityManager->getRepository(ToolCall::class)->count([]));
     }
 
-    public function testAFileThatCannotBeTakenGoesToQuarantineAndTheNextOnesStillCome(): void
+    public function testADiskProblemLeavesTheFileInPlaceForTheNextPass(): void
+    {
+        $this->write('v1-messages-2026-11-09T150000-aaaa1111.log', RequestLogs::claudeToolUse());
+        // The archive day cannot be created: a file stands where its directory would be.
+        file_put_contents(self::ARCHIVE.'/2026-11-09', 'not a directory');
+
+        try {
+            self::getContainer()->get(TrafficIngester::class)->ingest();
+            self::fail('a disk problem is reported');
+        } catch (\App\Traffic\ArchiveException) {
+        }
+
+        self::assertFileExists(self::LOGS.'/v1-messages-2026-11-09T150000-aaaa1111.log', 'not the file\'s fault: it waits');
+        self::assertSame([], self::getContainer()->get(TrafficIngester::class)->quarantined());
+        unlink(self::ARCHIVE.'/2026-11-09');
+        self::assertSame(1, self::getContainer()->get(TrafficIngester::class)->ingest());
+    }
+
+    public function testAFileTheProcessDiedOnTwiceGoesToQuarantineAndCanComeBack(): void
     {
         $this->write('v1-messages-2026-11-09T150000-aaaa1111.log', RequestLogs::claudeToolUse());
         $this->write('v1-messages-2026-11-09T150020-bbbb2222.log', RequestLogs::claudeToolResult());
-        // The first file's archive day cannot be written: a file stands where its directory would be.
-        file_put_contents(self::ARCHIVE.'/2026-11-09', 'not a directory');
+        // Two earlier runs died on the first file (memory): the marker says so.
+        file_put_contents(self::LOGS.'/.ingesting', json_encode(['file' => 'v1-messages-2026-11-09T150000-aaaa1111.log', 'attempts' => 2]));
 
         $ingester = self::getContainer()->get(TrafficIngester::class);
-        self::assertSame(0, $ingester->ingest());
+        self::assertSame(1, $ingester->ingest(), 'the next file still comes');
+        self::assertSame(['v1-messages-2026-11-09T150000-aaaa1111.log'], $ingester->quarantined());
+        self::assertStringContainsString('died', (string) file_get_contents('/tmp/cliproxy-test/quarantine/v1-messages-2026-11-09T150000-aaaa1111.log.error'));
 
-        self::assertSame(['v1-messages-2026-11-09T150000-aaaa1111.log', 'v1-messages-2026-11-09T150020-bbbb2222.log'], $ingester->quarantined());
-        self::assertFileExists('/tmp/cliproxy-test/quarantine/v1-messages-2026-11-09T150000-aaaa1111.log.error');
-        self::assertSame([], glob(self::LOGS.'/v1-*'));
+        self::assertSame(1, $ingester->retryQuarantined());
+        self::assertSame(1, $ingester->ingest());
+        self::assertSame([], $ingester->quarantined());
+        self::assertSame(2, $this->entityManager->getRepository(Exchange::class)->count([]));
+    }
+
+    public function testTakingAFileAgainKeepsTheResultsItsCallsAlreadyGot(): void
+    {
+        $this->write('v1-messages-2026-11-09T150000-aaaa1111.log', RequestLogs::claudeToolUse());
+        $this->write('v1-messages-2026-11-09T150020-bbbb2222.log', RequestLogs::claudeToolResult());
+        $ingester = self::getContainer()->get(TrafficIngester::class);
+        $ingester->ingest();
+
+        // A→B→A: the first file again (from the archive) must not lose the result B gave its call.
+        $first = $this->entityManager->getRepository(Exchange::class)->findOneBy(['requestTail' => 'aaaa1111']);
+        $ingester->reparse($first->archivePath);
+
+        $call = $this->entityManager->getRepository(ToolCall::class)->findOneBy(['callId' => 'toolu_1']);
+        self::assertTrue($call->answered);
+        self::assertTrue($call->isError);
+        self::assertSame(1, $this->entityManager->getRepository(ToolCall::class)->count([]));
+        self::assertSame(['2026-11-09/v1-messages-2026-11-09T150000-aaaa1111.log.gz', '2026-11-09/v1-messages-2026-11-09T150020-bbbb2222.log.gz'], $ingester->archived());
+    }
+
+    public function testWebsocketDetails(): void
+    {
+        $event = static fn (string $at, string $type, array|string $payload) => "Timestamp: $at\nEvent: websocket.$type\n".(\is_string($payload) ? $payload : json_encode($payload))."\n";
+        $timeline = implode("\n", [
+            // A prewarm: CLIProxyAPI answers it itself.
+            $event('2026-11-09T15:00:00.000000000+02:00', 'request', ['type' => 'response.create', 'model' => 'gpt-5.5-codex', 'generate' => false, 'input' => []]),
+            $event('2026-11-09T15:00:00.100000000+02:00', 'response', ['type' => 'response.completed', 'response' => ['status' => 'completed', 'output' => []]]),
+            // A turn ending with response.done, and an interrupt between events.
+            $event('2026-11-09T15:00:10.000000000+02:00', 'request', ['type' => 'response.create', 'model' => 'gpt-5.5-codex', 'input' => [['type' => 'message', 'role' => 'user', 'content' => 'Labas']]]),
+            $event('2026-11-09T15:00:11.000000000+02:00', 'response', ['type' => 'response.output_text.delta', 'delta' => 'La']),
+            $event('2026-11-09T15:00:11.500000000+02:00', 'interrupt.outcome', ['outcome' => 'none']),
+            $event('2026-11-09T15:00:12.000000000+02:00', 'response', ['type' => 'response.done', 'response' => ['status' => 'completed', 'output' => [['type' => 'message', 'content' => [['type' => 'output_text', 'text' => 'Labas!']]]]]]),
+        ]);
+        $this->write('v1-responses-2026-11-09T150000-wsws1234.log', "=== REQUEST INFO ===\nURL: /v1/responses\nMethod: GET\nTimestamp: 2026-11-09T15:00:00.000000000+02:00\n\n=== HEADERS ===\nUser-Agent: codex_cli_rs/0.149.1\n\n=== WEBSOCKET TIMELINE ===\n".$timeline."\n");
+
+        self::getContainer()->get(TrafficIngester::class)->ingest();
+
+        [$prewarm, $turn] = $this->entityManager->getRepository(Exchange::class)->findBy([], ['occurredAt' => 'ASC']);
+        self::assertSame('side', $prewarm->kind);
+        self::assertSame(['Labas', 'Labas!', 'completed', false, 200], [$turn->prompt, $turn->answer, $turn->stopReason, $turn->failed, $turn->statusCode]);
+    }
+
+    public function testSearchFindsShortWordsToo(): void
+    {
+        $this->write('v1-messages-2026-11-09T150000-aaaa1111.log', RequestLogs::claudeToolUse());
+        self::getContainer()->get(TrafficIngester::class)->ingest();
+        $this->browser->loginUser(new InMemoryUser('admin', 'test-password', ['ROLE_ADMIN']));
+
+        $this->browser->request('GET', '/traffic?range=all&q=paleisk+te');
+        self::assertSelectorCount(1, 'table.traffic tbody tr.row-link');
+        $this->browser->request('GET', '/traffic?range=all&q=nera+tokio');
+        self::assertSelectorCount(0, 'table.traffic tbody tr.row-link');
+    }
+
+    public function testUnfinishedLogPiecesMoveToTheArchiveAfterAnHour(): void
+    {
+        mkdir(self::LOGS.'/request-log-parts-abc');
+        file_put_contents(self::LOGS.'/request-log-parts-abc/part.tmp', 'timeline');
+        touch(self::LOGS.'/request-log-parts-abc/part.tmp', strtotime('2026-11-09 13:00:00 Europe/Vilnius'));
+        touch(self::LOGS.'/request-log-parts-abc', strtotime('2026-11-09 13:00:00 Europe/Vilnius'));
+
+        self::assertSame(1, self::getContainer()->get(TrafficIngester::class)->collectOrphans());
+        self::assertFileExists(self::ARCHIVE.'/orphans/2026-11-09/request-log-parts-abc/part.tmp');
     }
 
     public function testInjectedRemindersAreNotPartOfThePrompt(): void

@@ -26,6 +26,10 @@ class FakeCliProxy
     public bool $down = false;
     /** @var list<array{method: string, url: string, body: string}> */
     public array $external = [];
+    /** What ntfy answers. */
+    public int $externalStatus = 200;
+    /** Every management call refused, as with a wrong key (CLIProxyAPI still names its version). */
+    public bool $rejectAll = false;
     public string $latestVersion = 'v8.0.61';
     public bool $verified = true;
     /** The last config.yaml saved through PUT. */
@@ -37,14 +41,14 @@ class FakeCliProxy
             // Anything else the hub calls (ntfy pushes) is recorded and answered.
             $this->external[] = ['method' => $method, 'url' => $url, 'body' => (string) ($options['body'] ?? '')];
 
-            return new MockResponse('{}');
+            return new MockResponse('{}', ['http_code' => $this->externalStatus]);
         }
         if ($this->down) {
             return new MockResponse('', ['error' => 'Could not resolve host: cliproxy']);
         }
         $headers = $options['normalized_headers']['authorization'] ?? $options['headers'] ?? [];
-        if (!\in_array('Authorization: Bearer test-management-key', (array) $headers, true)) {
-            return new MockResponse('{"error":"invalid management key"}', ['http_code' => 401]);
+        if ($this->rejectAll || !\in_array('Authorization: Bearer test-management-key', (array) $headers, true)) {
+            return new MockResponse('{"error":"invalid management key"}', ['http_code' => 401, 'response_headers' => ['x-cpa-version' => 'v8.0.61']]);
         }
         $parts = parse_url($url);
         $path = substr($parts['path'] ?? '', \strlen('/v8/management'));

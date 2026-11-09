@@ -35,10 +35,12 @@ CREATE TABLE `exchange` (
   `archive_path` varchar(255) NOT NULL,
   `kind` varchar(16) NOT NULL DEFAULT 'main',
   `has_thinking` tinyint NOT NULL DEFAULT '0',
+  `usage_record_id` bigint DEFAULT NULL,
   PRIMARY KEY (`id`),
   UNIQUE KEY `UNIQ_D33BB0799DF1D865` (`log_file`),
   KEY `exchange_occurred` (`occurred_at`),
   KEY `exchange_session` (`session_id`,`occurred_at`),
   KEY `exchange_request` (`request_tail`),
+  KEY `exchange_usage` (`usage_record_id`),
   FULLTEXT KEY `exchange_fulltext` (`prompt`,`answer`,`thinking`,`error`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;

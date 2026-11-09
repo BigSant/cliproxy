@@ -41,7 +41,7 @@ class SoonestResetPrioritizer
     /**
      * Per provider, three bands: accounts with room first, ordered by when their week resets (sooner = higher); then
      * accounts whose 5-hour window is nearly used up (90 %+), so a new session does not start where it would soon hit
-     * the limit; last, with 0, accounts that are used up or that CLIProxyAPI holds back. A window whose reset has passed
+     * the limit; last, with 0, accounts that are used up, that CLIProxyAPI holds back or that need a new sign-in. A window whose reset has passed
      * counts as fresh. An account without a known reset ranks after those with one in its band.
      *
      * @param list<Account>                $accounts
@@ -64,7 +64,7 @@ class SoonestResetPrioritizer
                 $snapshot = $snapshots[$account->authIndex] ?? null;
                 $fiveHour = $snapshot?->window(QuotaWindow::FIVE_HOUR);
                 $week = $snapshot?->window(QuotaWindow::WEEK);
-                if ($account->quotaBlocked || $fiveHour?->isExhausted($now) || $week?->isExhausted($now)) {
+                if ($account->quotaBlocked || $account->requiresSignIn || $fiveHour?->isExhausted($now) || $week?->isExhausted($now)) {
                     $priorities[$account->name] = 0;
                     continue;
                 }

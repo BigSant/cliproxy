@@ -15,6 +15,12 @@ use Symfony\Component\Routing\Attribute\Route;
  */
 class HealthController
 {
+    public function __construct(
+        #[Autowire('%env(int:HEALTH_RETRY_MICROSECONDS)%')]
+        private readonly int $retryMicroseconds = 2_000_000,
+    ) {
+    }
+
     #[Route('/_health', name: 'app_health', methods: ['GET'])]
     public function __invoke(
         #[Autowire('%kernel.project_dir%/config/release.txt')] string $releaseFile,
@@ -29,7 +35,12 @@ class HealthController
         } catch (\Throwable) {
             $checks['database'] = 'down';
         }
+        // A deploy that recreates CLIProxyAPI checks this while it starts: give it up to 20 seconds.
         $version = $client->version();
+        for ($try = 0; null === $version && $try < 10; ++$try) {
+            usleep($this->retryMicroseconds);
+            $version = $client->version();
+        }
         $checks['cliproxy'] = $version ?? 'down';
         $healthy = !\in_array('down', $checks, true);
 

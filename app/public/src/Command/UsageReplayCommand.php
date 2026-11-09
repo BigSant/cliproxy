@@ -17,6 +17,7 @@ class UsageReplayCommand
     public function __construct(
         private readonly Collector $collector,
         private readonly UsageSpool $spool,
+        private readonly \Symfony\Component\Lock\LockFactory $lockFactory,
     ) {
     }
 
@@ -31,8 +32,16 @@ class UsageReplayCommand
 
             return Command::INVALID;
         }
-        foreach ($days as $one) {
-            $io->writeln(\sprintf('%s: %d records added.', $one, $this->collector->replay($one)));
+        // The collector's lock: a replay and a pass never store the same records at once.
+        $lock = $this->lockFactory->createLock('app-collect', ttl: 600);
+        $lock->acquire(true);
+        try {
+            foreach ($days as $one) {
+                $io->writeln(\sprintf('%s: %d records added.', $one, $this->collector->replay($one)));
+                $lock->refresh();
+            }
+        } finally {
+            $lock->release();
         }
 
         return Command::SUCCESS;

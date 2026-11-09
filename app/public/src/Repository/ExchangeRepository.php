@@ -161,9 +161,12 @@ class ExchangeRepository extends ServiceEntityRepository
         return $this->createQueryBuilder('e')
             ->where("e.authIndex = ''")
             ->andWhere("e.requestTail <> '' OR e.sessionId <> ''")
+            ->andWhere('e.usageRecordId IS NULL')
             ->andWhere('e.occurredAt >= :since')
             ->setParameter('since', $since, 'utc_datetime_immutable')
-            ->orderBy('e.id', 'DESC')
+            // Oldest first: a WebSocket connection's turns take its usage records in order.
+            ->orderBy('e.occurredAt', 'ASC')
+            ->addOrderBy('e.id', 'ASC')
             ->setMaxResults(500)
             ->getQuery()
             ->getResult();
@@ -198,30 +201,32 @@ class ExchangeRepository extends ServiceEntityRepository
         return $query;
     }
 
+    /** InnoDB's default stopwords: never indexed, so a required one would match nothing. */
+    private const array STOPWORDS = ['a', 'about', 'an', 'are', 'as', 'at', 'be', 'by', 'com', 'de', 'en', 'for', 'from', 'how', 'i',
+        'in', 'is', 'it', 'la', 'of', 'on', 'or', 'that', 'the', 'this', 'to', 'was', 'what', 'when', 'where', 'who', 'will',
+        'with', 'und', 'www'];
+
     /**
-     * Text search: MySQL's full-text index over prompt, answer, thinking and error (every word must appear); a
-     * substring scan where there is none (the SQLite tests).
+     * Text search over prompt, answer, thinking and error; every word must appear. On MySQL the words full-text can
+     * find (3+ characters, not stopwords) go through the index as prefixes (MATCH_AGAINST, in the same query as the
+     * other filters, so nothing is cut off); the rest, and everything elsewhere (the SQLite tests), as substrings.
      */
     private function searchText(QueryBuilder $query, string $text): void
     {
-        $connection = $this->getEntityManager()->getConnection();
-        if (!$connection->getDatabasePlatform() instanceof \Doctrine\DBAL\Platforms\AbstractMySQLPlatform) {
-            $query->andWhere('e.prompt LIKE :q OR e.answer LIKE :q OR e.thinking LIKE :q OR e.error LIKE :q')
-                ->setParameter('q', '%'.addcslashes($text, '%_\\').'%');
-
-            return;
-        }
-        $words = array_filter(preg_split('/[^\p{L}\p{N}_]+/u', $text) ?: [], static fn (string $word) => mb_strlen($word) >= 2);
+        $words = array_values(array_filter(preg_split('/[^\p{L}\p{N}_]+/u', mb_strtolower($text)) ?: [], static fn (string $word) => '' !== $word));
         if ([] === $words) {
-            $query->andWhere('1 = 0');
-
             return;
         }
-        $ids = $connection->fetchFirstColumn(
-            'SELECT id FROM exchange WHERE MATCH(prompt, answer, thinking, error) AGAINST (? IN BOOLEAN MODE) ORDER BY id DESC LIMIT 5000',
-            [implode(' ', array_map(static fn (string $word) => '+'.$word.'*', $words))],
-        );
-        $query->andWhere('e.id IN (:matches)')->setParameter('matches', [] === $ids ? [0] : array_map('intval', $ids));
+        $mysql = $this->getEntityManager()->getConnection()->getDatabasePlatform() instanceof \Doctrine\DBAL\Platforms\AbstractMySQLPlatform;
+        $indexed = $mysql ? array_values(array_filter($words, static fn (string $word) => mb_strlen($word) >= 3 && !\in_array($word, self::STOPWORDS, true))) : [];
+        if ([] !== $indexed) {
+            $query->andWhere('MATCH_AGAINST(e.prompt, e.answer, e.thinking, e.error, :fulltext) > 0')
+                ->setParameter('fulltext', implode(' ', array_map(static fn (string $word) => '+'.$word.'*', $indexed)));
+        }
+        foreach (array_values(array_diff($words, $indexed)) as $index => $word) {
+            $query->andWhere("e.prompt LIKE :like$index OR e.answer LIKE :like$index OR e.thinking LIKE :like$index OR e.error LIKE :like$index")
+                ->setParameter("like$index", '%'.addcslashes($word, '%_\\').'%');
+        }
     }
 
     private static function utc(\DateTimeImmutable $instant): string

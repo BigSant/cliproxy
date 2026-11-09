@@ -2,8 +2,6 @@
 
 namespace App\Settings;
 
-use App\Entity\Setting;
-use App\Repository\SettingRepository;
 use Doctrine\ORM\EntityManagerInterface;
 
 /** The dashboard's own settings and the collector's marks, stored in the database. */
@@ -25,9 +23,14 @@ class Settings
     public const string CLIPROXY_LATEST_CHECKED_AT = 'cliproxy_latest_checked_at';
     /** The configuration baseline applied once (ConfigBaseline::ONCE). */
     public const string CONFIG_BASELINE = 'config_baseline';
+    /** The collector's hourly replay of today's and yesterday's spool. */
+    public const string USAGE_REPLAYED_AT = 'usage_replayed_at';
+    /** The last limits read's errors, by auth index (Paskyros shows them). */
+    public const string QUOTA_ERRORS = 'quota_errors';
+    /** Set by Įspėjimai; the collector moves the quarantined request logs back into logs/. */
+    public const string QUARANTINE_RETRY_REQUESTED = 'quarantine_retry_requested';
 
     public function __construct(
-        private readonly SettingRepository $repository,
         private readonly EntityManagerInterface $entityManager,
     ) {
     }
@@ -57,19 +60,30 @@ class Settings
         $this->set($name, $now->format(\DATE_ATOM));
     }
 
+    /**
+     * Read from the database every time, not from the entity manager: the collector runs for a minute and must see
+     * what the dashboard changed meanwhile ("read now", auto priority).
+     */
     public function get(string $name): mixed
     {
-        return $this->repository->find($name)?->value;
+        $value = $this->connection()->fetchOne('SELECT value FROM setting WHERE name = ?', [$name]);
+
+        return false === $value || null === $value ? null : json_decode((string) $value, true);
     }
 
     public function set(string $name, mixed $value): void
     {
-        $setting = $this->repository->find($name);
-        if (null === $setting) {
-            $this->entityManager->persist(new Setting($name, $value));
+        $json = json_encode($value, \JSON_UNESCAPED_UNICODE | \JSON_UNESCAPED_SLASHES);
+        $connection = $this->connection();
+        if (false === $connection->fetchOne('SELECT 1 FROM setting WHERE name = ?', [$name])) {
+            $connection->insert('setting', ['name' => $name, 'value' => $json]);
         } else {
-            $setting->value = $value;
+            $connection->update('setting', ['value' => $json], ['name' => $name]);
         }
-        $this->entityManager->flush();
+    }
+
+    private function connection(): \Doctrine\DBAL\Connection
+    {
+        return $this->entityManager->getConnection();
     }
 }

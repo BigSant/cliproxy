@@ -8,6 +8,10 @@ doctrine:
             # Instants stored in UTC, so that comparing them is right across the DST change.
             utc_datetime_immutable: App\Doctrine\UtcDateTimeImmutableType
     orm:
+        dql:
+            string_functions:
+                # MySQL full-text search in DQL (Žurnalas search).
+                MATCH_AGAINST: App\Doctrine\MatchAgainst
         validate_xml_mapping: true
         naming_strategy: doctrine.orm.naming_strategy.underscore
         identity_generation_preferences:

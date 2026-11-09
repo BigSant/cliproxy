@@ -113,7 +113,7 @@ class ManagementClient
     {
         $result = $this->json('POST', '/requests/api-call', [
             'auth_index' => $authIndex, 'method' => $method, 'url' => $url, 'header' => $headers,
-        ]);
+        ], timeout: 10);
 
         return ['status_code' => (int) ($result['status_code'] ?? 0), 'body' => (string) ($result['body'] ?? '')];
     }
@@ -128,7 +128,8 @@ class ManagementClient
     {
         $records = $this->json('GET', '/observability/usage/queue', query: ['count' => $count]);
 
-        return array_values(array_filter($records, 'is_array'));
+        // CLIProxyAPI hands a record it could not encode as a string: kept as it came, never dropped.
+        return array_values(array_map(static fn ($record) => \is_array($record) ? $record : ['_unparsed' => (string) json_encode($record)], $records));
     }
 
     /** @return array<string, mixed> the configuration in the v8 layout */
@@ -181,6 +182,10 @@ class ManagementClient
     {
         try {
             $response = $this->request('GET', '/config', timeout: 3);
+            // CLIProxyAPI names its version on a refused request too: only an accepted key counts as working.
+            if ($response->getStatusCode() >= 300) {
+                return null;
+            }
             $headers = $response->getHeaders(false);
 
             return $headers['x-cpa-version'][0] ?? null;
@@ -220,9 +225,9 @@ class ManagementClient
      *
      * @return array<mixed>
      */
-    private function json(string $method, string $path, ?array $json = null, array $query = []): array
+    private function json(string $method, string $path, ?array $json = null, array $query = [], float $timeout = 20): array
     {
-        $response = $this->request($method, $path, $json, $query);
+        $response = $this->request($method, $path, $json, $query, timeout: $timeout);
         $this->check($response);
         $content = $response->getContent(false);
         if ('' === trim($content)) {
