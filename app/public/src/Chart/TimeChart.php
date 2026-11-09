@@ -14,7 +14,6 @@ final class TimeChart
     private const int RIGHT = 14;
     private const int TOP = 30;
     private const int BOTTOM = 30;
-    private const array WEEKDAYS = ['Sk', 'Pr', 'An', 'Tr', 'Kt', 'Pn', 'Št'];
 
     /** @var list<array{key: string, d: string, area: ?string, dashed: bool, color: string, label: string}> */
     public array $series = [];
@@ -29,6 +28,8 @@ final class TimeChart
         public readonly float $max,
         public readonly string $unit = '%',
         public readonly ?int $now = null,
+        /** @var list<string> short day names from Sunday, for the day ticks */
+        private readonly array $weekdays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'],
     ) {
     }
 
@@ -110,7 +111,7 @@ final class TimeChart
             return $ticks;
         }
         for (; $day->getTimestamp() <= $this->to; $day = $day->modify("+$every day")) {
-            $ticks[] = ['x' => $this->x($day->getTimestamp()), 'label' => self::WEEKDAYS[(int) $day->format('w')].' '.$day->format('j')];
+            $ticks[] = ['x' => $this->x($day->getTimestamp()), 'label' => $this->weekdays[(int) $day->format('w')].' '.$day->format('j')];
         }
 
         return $ticks;

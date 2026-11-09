@@ -1,48 +1,48 @@
 {% extends 'base.html.twig' %}
 
-{% block title %}Įspėjimai{% endblock %}
+{% block title %}{{ 'nav.alerts'|trans }}{% endblock %}
 
 {% block body %}
     <div class="page-head">
-        <div class="title-line"><h1>Įspėjimai</h1><span class="muted">{{ open|length }} aktyvūs</span></div>
+        <div class="title-line"><h1>{{ 'nav.alerts'|trans }}</h1><span class="muted">{{ 'alerts.open_count'|trans({'%count%': open|length}) }}</span></div>
         <div class="head-actions">
             {% if open|filter(a => a.alertKey == 'traffic:quarantine')|length %}
                 <form method="post" action="{{ path('app_alerts_retry') }}">
                     <input type="hidden" name="_token" value="{{ csrf_token('alerts') }}">
-                    <button class="button">Bandyti karantino failus dar kartą</button>
+                    <button class="button">{{ 'alerts.retry_quarantine'|trans }}</button>
                 </form>
             {% endif %}
-            {% for key, label in {'usage:broken': ['broken', 'Nutrūkusias spool eilutes peržiūrėjau'], 'usage:lost': ['lost', 'Prarastus įrašus peržiūrėjau']} %}
+            {% for key, label in {'usage:broken': ['broken', 'alerts.seen_broken'], 'usage:lost': ['lost', 'alerts.seen_lost']} %}
                 {% if open|filter(a => a.alertKey == key)|length %}
                     <form method="post" action="{{ path('app_alerts_seen', {what: label[0]}) }}">
                         <input type="hidden" name="_token" value="{{ csrf_token('alerts') }}">
-                        <button class="button">{{ label[1] }}</button>
+                        <button class="button">{{ label[1]|trans }}</button>
                     </form>
                 {% endif %}
             {% endfor %}
-            <a class="button" href="{{ path('app_settings') }}#ntfy">Pranešimai į telefoną (ntfy)</a>
+            <a class="button" href="{{ path('app_settings') }}#ntfy">{{ 'alerts.ntfy'|trans }}</a>
         </div>
     </div>
     <section class="card">
         {% for alert in open %}
             <div class="alert-row alert-{{ alert.level }}">
-                <span class="tag {{ alert.level == 'error' ? 'tag-bad' : (alert.level == 'warning' ? 'tag-warn' : 'tag-info') }}">{{ {error: 'klaida', warning: 'dėmesio', info: 'žinia'}[alert.level] }}</span>
+                <span class="tag {{ alert.level == 'error' ? 'tag-bad' : (alert.level == 'warning' ? 'tag-warn' : 'tag-info') }}">{{ ('alerts.level.' ~ alert.level)|trans }}</span>
                 <div>
-                    <div>{{ alert.message }}</div>
-                    <div class="muted small">nuo {{ alert.firstSeenAt|date('m-d H:i') }} · paskutinį kartą {{ alert.lastSeenAt|ago }}{% if alert.notifiedAt %} · išsiųsta į ntfy{% endif %}</div>
+                    <div>{{ alert|alert_message }}</div>
+                    <div class="muted small">{{ 'alerts.seen'|trans({'%since%': alert.firstSeenAt|date('m-d H:i'), '%ago%': alert.lastSeenAt|ago}) }}{% if alert.notifiedAt %}{{ 'alerts.sent'|trans }}{% endif %}</div>
                 </div>
             </div>
         {% else %}
-            <p class="muted">Viskas tvarkoje – aktyvių įspėjimų nėra.</p>
+            <p class="muted">{{ 'alerts.none'|trans }}</p>
         {% endfor %}
     </section>
     {% if resolved is not empty %}
         <section class="card">
-            <h2>Išspręsti</h2>
+            <h2>{{ 'alerts.resolved'|trans }}</h2>
             {% for alert in resolved %}
                 <div class="alert-row is-resolved">
                     <span class="tag">{{ alert.resolvedAt|date('m-d H:i') }}</span>
-                    <div><div>{{ alert.message }}</div><div class="muted small">nuo {{ alert.firstSeenAt|date('m-d H:i') }}</div></div>
+                    <div><div>{{ alert|alert_message }}</div><div class="muted small">{{ 'common.since'|trans({'%time%': alert.firstSeenAt|date('m-d H:i')}) }}</div></div>
                 </div>
             {% endfor %}
         </section>

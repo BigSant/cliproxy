@@ -4,14 +4,14 @@
     <div>
         <div class="account-name email">{{ account.label }}</div>
         <div class="account-meta">
-            {% if account.disabled %}<span class="tag tag-off">išjungta</span>
-            {% elseif account.requiresSignIn %}<span class="tag tag-bad">reikia prisijungti</span>
-            {% elseif account.unavailable or account.status == 'error' %}<span class="tag tag-bad" title="{{ account.statusMessage }}">klaida</span>
-            {% elseif account.cooldowns is not empty %}<span class="tag tag-warn" title="{{ account.cooldowns|first.reason }}">pauzė {{ account.cooldowns|first.retryAt|until }}</span>
-            {% else %}<span class="tag tag-ok">aktyvi</span>{% endif %}
+            {% if account.disabled %}<span class="tag tag-off">{{ 'account_cell.disabled'|trans }}</span>
+            {% elseif account.requiresSignIn %}<span class="tag tag-bad">{{ 'account_cell.sign_in'|trans }}</span>
+            {% elseif account.unavailable or account.status == 'error' %}<span class="tag tag-bad" title="{{ account.statusMessage }}">{{ 'account_cell.error'|trans }}</span>
+            {% elseif account.cooldowns is not empty %}<span class="tag tag-warn" title="{{ account.cooldowns|first.reason }}">{{ 'account_cell.cooldown'|trans({'%until%': account.cooldowns|first.retryAt|until}) }}</span>
+            {% else %}<span class="tag tag-ok">{{ 'account_cell.active'|trans }}</span>{% endif %}
             {% if row.snapshot and row.snapshot.plan %}<span class="tag">{{ row.snapshot.plan }}</span>{% elseif account.planType %}<span class="tag">{{ account.planType }}</span>{% endif %}
-            <span class="tag" title="Prioritetas: didesnis naudojamas pirmiau">P{{ account.priority }}</span>
-            {% if row.snapshot and row.snapshot.bankedResets %}<span class="tag" title="Sukaupti savaitinio limito atstatymai">{{ row.snapshot.bankedResets }}× reset</span>{% endif %}
+            <span class="tag" title="{{ 'account_cell.priority'|trans }}">P{{ account.priority }}</span>
+            {% if row.snapshot and row.snapshot.bankedResets %}<span class="tag" title="{{ 'account_cell.banked_resets'|trans }}">{{ row.snapshot.bankedResets }}× reset</span>{% endif %}
             {% if account.note %}<span class="note">{{ account.note }}</span>{% endif %}
         </div>
     </div>

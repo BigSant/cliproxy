@@ -1,33 +1,33 @@
 {% extends 'base.html.twig' %}
 
-{% block title %}Naudojimas{% endblock %}
+{% block title %}{{ 'nav.usage'|trans }}{% endblock %}
 
 {% block body %}
     <div class="page-head">
-        <h1>Naudojimas</h1>
+        <h1>{{ 'nav.usage'|trans }}</h1>
         <nav class="segmented">
             {% for key, item in ranges %}
-                <a href="{{ path('app_usage', {range: key}) }}" class="{{ key == range ? 'active' }}">{{ item[1] }}</a>
+                <a href="{{ path('app_usage', {range: key}) }}" class="{{ key == range ? 'active' }}">{{ item[1]|trans }}</a>
             {% endfor %}
         </nav>
     </div>
 
     <section class="stats">
-        <div class="stat"><div class="stat-label">Užklausos</div><div class="stat-value">{{ totals.requests|tokens }}</div><div class="stat-sub">{{ totals.failed }} nepavyko ({{ totals.failed|share(totals.requests) }})</div></div>
-        <div class="stat"><div class="stat-label">Tokenai</div><div class="stat-value">{{ totals.total|tokens }}</div><div class="stat-sub">įvestis {{ totals.input|tokens }} · išvestis {{ totals.output|tokens }}</div></div>
-        <div class="stat"><div class="stat-label">Cache skaitymai</div><div class="stat-value">{{ totals.cache_read|tokens }}</div><div class="stat-sub">{{ totals.cache_read|share(totals.cache_read + totals.cache_creation + totals.input) }} visos įvesties</div></div>
-        <div class="stat {{ totals.cache_creation > totals.cache_read ? 'stat-warn' }}"><div class="stat-label">Cache rašymai</div><div class="stat-value">{{ totals.cache_creation|tokens }}</div><div class="stat-sub">{{ totals.cache_creation > totals.cache_read ? 'rašoma daugiau nei skaitoma – tikrink affinity' : 'santykis tvarkingas' }}</div></div>
+        <div class="stat"><div class="stat-label">{{ 'common.requests'|trans }}</div><div class="stat-value">{{ totals.requests|tokens }}</div><div class="stat-sub">{{ 'common.failed_share'|trans({'%count%': totals.failed, '%share%': totals.failed|share(totals.requests)}) }}</div></div>
+        <div class="stat"><div class="stat-label">{{ 'common.tokens'|trans }}</div><div class="stat-value">{{ totals.total|tokens }}</div><div class="stat-sub">{{ 'common.input_output'|trans({'%input%': totals.input|tokens, '%output%': totals.output|tokens}) }}</div></div>
+        <div class="stat"><div class="stat-label">{{ 'usage.cache_reads'|trans }}</div><div class="stat-value">{{ totals.cache_read|tokens }}</div><div class="stat-sub">{{ 'usage.of_input'|trans({'%share%': totals.cache_read|share(totals.cache_read + totals.cache_creation + totals.input)}) }}</div></div>
+        <div class="stat {{ totals.cache_creation > totals.cache_read ? 'stat-warn' }}"><div class="stat-label">{{ 'usage.cache_writes'|trans }}</div><div class="stat-value">{{ totals.cache_creation|tokens }}</div><div class="stat-sub">{{ (totals.cache_creation > totals.cache_read ? 'usage.writes_exceed' : 'usage.writes_fine')|trans }}</div></div>
         {% include '_parts/cache_ttl_stat.html.twig' %}
     </section>
 
     <section class="card">
-        <h2>Per dieną <span class="muted small">(UTC)</span></h2>
+        <h2>{{ 'usage.per_day'|trans }} <span class="muted small">(UTC)</span></h2>
         {% if days is empty %}
-            <p class="muted">Šiame laikotarpyje užklausų nėra.</p>
+            <p class="muted">{{ 'usage.no_requests'|trans }}</p>
         {% else %}
-            <div class="chart" role="img" aria-label="Tokenai per dieną">
+            <div class="chart" role="img" aria-label="{{ 'usage.chart_label'|trans }}">
                 {% for day in days %}
-                    <div class="chart-col" title="{{ day.day }}: {{ day.total|tokens }} tokenų, {{ day.requests }} užkl., cache skait. {{ day.cache_read|tokens }}, raš. {{ day.cache_creation|tokens }}">
+                    <div class="chart-col" title="{{ 'usage.day_title'|trans({'%day%': day.day, '%tokens%': day.total|tokens, '%requests%': day.requests, '%read%': day.cache_read|tokens, '%write%': day.cache_creation|tokens}) }}">
                         <div class="chart-bar" style="height: {{ (day.total / dayMax * 100)|number_format(1, '.') }}%">
                             <span class="chart-cache" style="height: {{ day.total > 0 ? (day.cache_read / day.total * 100)|number_format(1, '.') : 0 }}%"></span>
                         </div>
@@ -35,31 +35,30 @@
                     </div>
                 {% endfor %}
             </div>
-            <p class="legend"><span class="swatch swatch-total"></span> visi tokenai <span class="swatch swatch-cache"></span> iš jų cache skaitymai</p>
+            <p class="legend"><span class="swatch swatch-total"></span> {{ 'usage.legend_total'|trans }} <span class="swatch swatch-cache"></span> {{ 'usage.legend_cache'|trans }}</p>
         {% endif %}
     </section>
 
     <div class="grid-2">
         <section class="card">
-            <h2>Pagal paskyrą</h2>
-            {% include 'usage/_table.html.twig' with {rows: accounts, label: 'account', label_title: 'Paskyra'} %}
+            <h2>{{ 'usage.by_account'|trans }}</h2>
+            {% include 'usage/_table.html.twig' with {rows: accounts, label: 'account', label_title: 'common.account'|trans} %}
         </section>
         <section class="card">
-            <h2>Pagal modelį ir effort</h2>
-            {% include 'usage/_table.html.twig' with {rows: models, label: 'model', label_title: 'Modelis'} %}
+            <h2>{{ 'usage.by_model'|trans }}</h2>
+            {% include 'usage/_table.html.twig' with {rows: models, label: 'model', label_title: 'common.model'|trans} %}
         </section>
     </div>
 
     <section class="card">
         <h2>Session affinity</h2>
         <p>
-            {{ affinity.sessions }} sesijų, iš jų <strong class="{{ affinity.moved > 0 ? 'bad' }}">{{ affinity.moved }}</strong> aptarnavo daugiau nei viena paskyra.
-            Prompt cache priklauso paskyrai: sesija, peršokusi į kitą paskyrą, cache rašo iš naujo.
-            Pavienis perėjimas, kai paskyros limitas baigiasi, yra normalus; daug perėjimų reiškia, kad affinity neveikia (Nustatymai → Session affinity).
+            {{ 'usage.affinity.sessions'|trans({'%count%': affinity.sessions}) }} <strong class="{{ affinity.moved > 0 ? 'bad' }}">{{ affinity.moved }}</strong> {{ 'usage.affinity.moved'|trans }}
+            {{ 'usage.affinity.explain'|trans }}
         </p>
         {% if affinity.examples is not empty %}
             <table>
-                <thead><tr><th>Sesija</th><th class="num">Paskyros</th><th class="num">Užklausos</th></tr></thead>
+                <thead><tr><th>{{ 'common.session'|trans }}</th><th class="num">{{ 'common.accounts'|trans }}</th><th class="num">{{ 'common.requests'|trans }}</th></tr></thead>
                 <tbody>
                     {% for example in affinity.examples %}
                         <tr><td><code>{{ example.session_id }}</code></td><td class="num">{{ example.accounts }}</td><td class="num">{{ example.requests }}</td></tr>

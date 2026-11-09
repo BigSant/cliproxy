@@ -7,6 +7,8 @@ CREATE TABLE `alert` (
   `message` varchar(500) NOT NULL,
   `first_seen_at` datetime NOT NULL,
   `alert_key` varchar(190) NOT NULL,
+  `message_key` varchar(190) DEFAULT NULL,
+  `message_params` json DEFAULT NULL,
   PRIMARY KEY (`id`),
   KEY `alert_open` (`resolved_at`),
   KEY `alert_key` (`alert_key`)

@@ -55,7 +55,8 @@ class ConfigBaseline
     }
 
     /**
-     * What a config.yaml saved from the editor may not do: the reasons it breaks the hub's data policy.
+     * What a config.yaml saved from the editor may not do: the reasons it breaks the hub's data policy, as translation
+     * keys (config_policy.* in translations/).
      *
      * @param array<string, mixed> $config the parsed YAML
      *
@@ -68,22 +69,22 @@ class ConfigBaseline
         $usage = (array) ($config['observability']['usage'] ?? []);
         // Explicit values only: CLIProxyAPI's defaults for a missing key are not the hub's policy.
         if (0 !== ($logs['logs-max-total-size-mb'] ?? null) || 0 !== ($logs['error-logs-max-files'] ?? null)) {
-            $violations[] = 'log failų valymas (observability.logs: logs-max-total-size-mb ir error-logs-max-files turi būti nurodyti ir lygūs 0)';
+            $violations[] = 'config_policy.log_cleanup';
         }
         if (true !== ($usage['usage-statistics-enabled'] ?? null)) {
-            $violations[] = 'usage statistika neįjungta (observability.usage.usage-statistics-enabled: true)';
+            $violations[] = 'config_policy.usage_statistics';
         }
         if ($requestLog && true !== ($logs['request-log'] ?? null)) {
-            $violations[] = 'request-log neįjungtas (observability.logs.request-log: true; išjunk Nustatymuose → Srauto žurnalas, jei tikrai reikia)';
+            $violations[] = 'config_policy.request_log';
         }
         // Full-duplex steering: CLIProxyAPI then logs one request per socket, and the journal's turns run together.
         // (and its older places, which CLIProxyAPI still reads)
         if (true === ($config['upstream']['codex']['response-steering'] ?? $config['codex']['response-steering'] ?? $config['oauth']['providers']['codex']['response-steering'] ?? false)) {
-            $violations[] = 'upstream.codex.response-steering įjungtas – srauto žurnalas nebeatskirtų WS turn\'ų';
+            $violations[] = 'config_policy.response_steering';
         }
         $keys = $config['access']['api-keys'] ?? null;
         if (!\is_array($keys) || [] === array_filter($keys, static fn ($key) => \is_string($key) && '' !== trim($key))) {
-            $violations[] = 'nėra nė vieno kliento rakto (access.api-keys) – autentifikacija būtų išjungta';
+            $violations[] = 'config_policy.api_keys';
         }
 
         return $violations;

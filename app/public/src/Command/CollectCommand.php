@@ -186,11 +186,11 @@ class CollectCommand
         try {
             $conditions += $this->alerts->accountConditions($this->client->accounts(), $this->snapshots->latest());
         } catch (\App\CliProxy\ManagementException $exception) {
-            $conditions['cliproxy'] = ['level' => Alert::ERROR, 'message' => 'CLIProxyAPI neatsako: '.$exception->getMessage()];
+            $conditions['cliproxy'] = ['level' => Alert::ERROR, 'key' => 'alert.cliproxy_down', 'params' => ['%error%' => $exception->getMessage()]];
             // Without CLIProxyAPI the accounts are unknown, not fine: their open alerts stay as they are.
             foreach ($this->alertRepository->open() as $alert) {
                 if (preg_match('/^(signin|account|pool):/', $alert->alertKey)) {
-                    $conditions[$alert->alertKey] = ['level' => $alert->level, 'message' => $alert->message];
+                    $conditions[$alert->alertKey] = ['level' => $alert->level, 'key' => $alert->messageKey, 'params' => $alert->messageParams, 'message' => $alert->message];
                 }
             }
         }
@@ -199,39 +199,38 @@ class CollectCommand
         $this->collector->saveLost();
         $lost = (int) $this->settings->get(Settings::USAGE_LOST);
         if ($lost > (int) $this->settings->get(Settings::USAGE_LOST_SEEN)) {
-            $conditions['usage:lost'] = ['level' => Alert::ERROR, 'message' => \sprintf('%d usage įrašų neįrašyta nei į spool\'ą, nei į DB. Jų kopija – tik cron log\'e (eilutės „usage-record-lost“, '
-                .'laikomos ~100 paleidimų): atkūrimas README. Eilė neimama, kol spool\'as vėl priims įrašus.', $lost - (int) $this->settings->get(Settings::USAGE_LOST_SEEN))];
+            $conditions['usage:lost'] = ['level' => Alert::ERROR, 'key' => 'alert.usage_lost', 'params' => ['%count%' => $lost - (int) $this->settings->get(Settings::USAGE_LOST_SEEN)]];
         }
         if (isset($this->errors['usage']) && !isset($conditions['cliproxy'])) {
-            $conditions['collector:usage'] = ['level' => Alert::WARNING, 'message' => 'Usage įrašų nepavyko įrašyti: '.rtrim($this->errors['usage'], '.').match ($this->usageOutcome) {
-                Collector::IN_SPOOL => ' (jie spool\'e ir bus įrašyti vėliau).',
-                Collector::LEFT_IN_QUEUE => '. Nei spool\'as, nei DB jų nepriima – paliekami CLIProxyAPI eilėje (ji juos laiko valandą).',
-                Collector::LOST => '. Dalis įrašų prarasta (žr. usage:lost).',
-                Collector::HALTED => '. Po prarastų įrašų eilė neimama, kol spool\'as vėl priims įrašus (CLIProxyAPI juos laiko valandą).',
-                default => '.',
-            }];
+            $conditions['collector:usage'] = ['level' => Alert::WARNING, 'key' => 'alert.usage_failed.'.match ($this->usageOutcome) {
+                Collector::IN_SPOOL => 'in_spool',
+                Collector::LEFT_IN_QUEUE => 'left_in_queue',
+                Collector::LOST => 'lost',
+                Collector::HALTED => 'halted',
+                default => 'other',
+            }, 'params' => ['%error%' => rtrim($this->errors['usage'], '.')]];
         }
         $seen = (array) ($this->settings->get(Settings::USAGE_BROKEN_LINES_SEEN) ?? []);
         $broken = array_filter((array) ($this->settings->get(Settings::USAGE_BROKEN_LINES) ?? []), static fn ($count, $day) => $count > ($seen[$day] ?? 0), \ARRAY_FILTER_USE_BOTH);
         if ([] !== $broken) {
-            $conditions['usage:broken'] = ['level' => Alert::WARNING, 'message' => 'Usage spool\'e yra neperskaitomų (nutrūkusių) eilučių: '
-                .implode(', ', array_map(static fn ($day, $count) => "$day – $count", array_keys($broken), $broken)).'. Jos paliktos faile.'];
+            $conditions['usage:broken'] = ['level' => Alert::WARNING, 'key' => 'alert.usage_broken',
+                'params' => ['%days%' => implode(', ', array_map(static fn ($day, $count) => "$day – $count", array_keys($broken), $broken))]];
         }
         if ([] !== $this->spool->pendingDays()) {
-            $conditions['usage:pending'] = ['level' => Alert::WARNING, 'message' => 'Usage spool laukia pakartotinio įrašymo: '.implode(', ', $this->spool->pendingDays()).'.'];
+            $conditions['usage:pending'] = ['level' => Alert::WARNING, 'key' => 'alert.usage_pending', 'params' => ['%days%' => implode(', ', $this->spool->pendingDays())]];
         }
         if (isset($this->errors['traffic'])) {
-            $conditions['collector:traffic'] = ['level' => Alert::WARNING, 'message' => 'Srauto žurnalas nesirenka: '.$this->errors['traffic'].' (failai laukia logs/).'];
+            $conditions['collector:traffic'] = ['level' => Alert::WARNING, 'key' => 'alert.traffic_failed', 'params' => ['%error%' => $this->errors['traffic']]];
         }
         $quarantined = $this->traffic->quarantined();
         if ([] !== $quarantined) {
-            $conditions['traffic:quarantine'] = ['level' => Alert::WARNING, 'message' => \sprintf('%d request log\'ų nepavyko perskaityti – jie cliproxy-traffic/quarantine/ su klaida šalia.', \count($quarantined))];
+            $conditions['traffic:quarantine'] = ['level' => Alert::WARNING, 'key' => 'alert.quarantine', 'params' => ['%count%' => \count($quarantined)]];
         }
         $conditions += $this->alerts->diskConditions();
         $version = $this->settings->get(Settings::CLIPROXY_VERSION);
         $latest = $this->settings->get(Settings::CLIPROXY_LATEST);
         if (\is_string($version) && \is_string($latest) && version_compare(ltrim($latest, 'v'), ltrim($version, 'v'), '>')) {
-            $conditions['cliproxy:update'] = ['level' => Alert::INFO, 'message' => \sprintf('Išleista CLIProxyAPI %s (veikia %s). Atnaujinimas – CLIPROXY_VERSION env/common.env, išbandžius lokaliai.', $latest, $version)];
+            $conditions['cliproxy:update'] = ['level' => Alert::INFO, 'key' => 'alert.update', 'params' => ['%latest%' => $latest, '%version%' => $version]];
         }
         $this->alerts->sync($conditions);
     }

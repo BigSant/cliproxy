@@ -14,6 +14,7 @@ use Symfony\Component\HttpFoundation\RedirectResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\Routing\Attribute\Route;
+use Symfony\Contracts\Translation\TranslatorInterface;
 
 /**
  * Paskyros: sign Claude and Codex accounts in, take them out of rotation, set their routing fields, remove them.
@@ -31,6 +32,7 @@ class AccountController extends AbstractController
         private readonly QuotaSnapshotRepository $snapshots,
         private readonly ClockInterface $clock,
         private readonly Settings $settings,
+        private readonly TranslatorInterface $translator,
     ) {
     }
 
@@ -96,7 +98,7 @@ class AccountController extends AbstractController
         $this->checkToken($request);
         $authIndex = (string) $request->request->get('auth_index');
 
-        return $this->attempt(fn () => $this->client->resetCooldown($authIndex), 'Pauzė atšaukta.');
+        return $this->attempt(fn () => $this->client->resetCooldown($authIndex), 'accounts.flash.cooldown_cleared');
     }
 
     /** The pasted callback address goes to CLIProxyAPI, which exchanges the code and saves the account. */
@@ -107,7 +109,7 @@ class AccountController extends AbstractController
         $login = $request->getSession()->get(self::LOGIN);
         $redirectUrl = trim((string) $request->request->get('redirect_url'));
         if (!\is_array($login) || '' === $redirectUrl) {
-            $this->addFlash('error', 'Įklijuok adresą, kuriuo baigėsi prisijungimas.');
+            $this->addFlash('error', $this->translator->trans('accounts.flash.paste_callback'));
 
             return $this->redirectToRoute('app_accounts');
         }
@@ -122,12 +124,14 @@ class AccountController extends AbstractController
             }
             if ('ok' === $status['status']) {
                 $request->getSession()->remove(self::LOGIN);
-                $this->addFlash('success', 'Paskyra prijungta'.(isset($status['auth_id']) ? ': '.$status['auth_id'] : '').'. Limitai atsinaujins per kelias minutes.');
+                $this->addFlash('success', isset($status['auth_id'])
+                    ? $this->translator->trans('accounts.flash.connected_as', ['%account%' => $status['auth_id']])
+                    : $this->translator->trans('accounts.flash.connected'));
             } elseif ('wait' === $status['status']) {
-                $this->addFlash('notice', 'CLIProxyAPI dar keičia kodą į raktą. Atnaujink puslapį po kelių sekundžių.');
+                $this->addFlash('notice', $this->translator->trans('accounts.flash.login_pending'));
             } else {
                 $request->getSession()->remove(self::LOGIN);
-                $this->addFlash('error', 'Prisijungti nepavyko: '.($status['error'] ?? 'nežinoma klaida'));
+                $this->addFlash('error', $this->translator->trans('accounts.flash.login_failed', ['%error%' => $status['error'] ?? $this->translator->trans('accounts.flash.unknown_error')]));
             }
         }, flash: false);
     }
@@ -163,7 +167,7 @@ class AccountController extends AbstractController
         $disabled = $request->request->getBoolean('disabled');
 
         return $this->attempt(fn () => $this->client->setDisabled($name, $disabled),
-            $disabled ? 'Paskyra išimta iš rotacijos.' : 'Paskyra grąžinta į rotaciją.');
+            $disabled ? 'accounts.flash.disabled' : 'accounts.flash.enabled');
     }
 
     #[Route('/fields', name: 'app_accounts_fields', methods: ['POST'])]
@@ -182,7 +186,7 @@ class AccountController extends AbstractController
             $fields['websockets'] = $request->request->getBoolean('websockets');
         }
 
-        return $this->attempt(fn () => $this->client->updateFields($name, $fields), 'Paskyros nustatymai išsaugoti.');
+        return $this->attempt(fn () => $this->client->updateFields($name, $fields), 'accounts.flash.fields_saved');
     }
 
     #[Route('/refresh', name: 'app_accounts_refresh', methods: ['POST'])]
@@ -191,7 +195,7 @@ class AccountController extends AbstractController
         $this->checkToken($request);
         $name = $this->name($request);
 
-        return $this->attempt(fn () => $this->client->refresh($name), 'Raktas atnaujintas.');
+        return $this->attempt(fn () => $this->client->refresh($name), 'accounts.flash.refreshed');
     }
 
     #[Route('/verify', name: 'app_accounts_verify', methods: ['POST'])]
@@ -204,7 +208,8 @@ class AccountController extends AbstractController
             $result = $this->client->verify($name);
             // CLIProxyAPI answers {status, verified, …}: "verified" says whether the 1-token test worked.
             $ok = true === ($result['verified'] ?? $result['ok'] ?? $result['success'] ?? null);
-            $this->addFlash($ok ? 'success' : 'error', $ok ? 'Paskyra atsako.' : 'Paskyra neatsako: '.json_encode($result, \JSON_UNESCAPED_UNICODE));
+            $this->addFlash($ok ? 'success' : 'error', $ok ? $this->translator->trans('accounts.flash.verified')
+                : $this->translator->trans('accounts.flash.not_verified', ['%result%' => json_encode($result, \JSON_UNESCAPED_UNICODE)]));
         }, flash: false);
     }
 
@@ -214,7 +219,7 @@ class AccountController extends AbstractController
         $this->checkToken($request);
         $name = $this->name($request);
 
-        return $this->attempt(fn () => $this->client->delete($name), 'Paskyra pašalinta iš hub\'o.');
+        return $this->attempt(fn () => $this->client->delete($name), 'accounts.flash.deleted');
     }
 
     /** The collector reads the limits on its next pass (seconds): a web request never waits on every provider. */
@@ -223,7 +228,7 @@ class AccountController extends AbstractController
     {
         $this->checkToken($request);
         $settings->set(Settings::QUOTA_REFRESH_REQUESTED, true);
-        $this->addFlash('success', 'Limitai bus perskaityti per kelias sekundes – atnaujink puslapį.');
+        $this->addFlash('success', $this->translator->trans('accounts.flash.quotas_requested'));
 
         return $this->redirectToRoute(match ((string) $request->request->get('back')) {
             'dashboard' => 'app_dashboard',
@@ -249,12 +254,13 @@ class AccountController extends AbstractController
         }
     }
 
+    /** @param ?string $success the translation key of the flash when it worked */
     private function attempt(callable $action, ?string $success = null, string $route = 'app_accounts', bool $flash = true): RedirectResponse
     {
         try {
             $action();
             if ($flash && null !== $success) {
-                $this->addFlash('success', $success);
+                $this->addFlash('success', $this->translator->trans($success));
             }
         } catch (ManagementException $exception) {
             $this->addFlash('error', $exception->getMessage());

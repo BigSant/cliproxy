@@ -9,6 +9,7 @@ use Symfony\Component\HttpFoundation\RedirectResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\Routing\Attribute\Route;
+use Symfony\Contracts\Translation\TranslatorInterface;
 
 /** Įspėjimai: what needs the person now, and what did before. */
 class AlertController extends AbstractController
@@ -27,13 +28,13 @@ class AlertController extends AbstractController
      * dashboard only reads it) moves them back into logs/ on its next pass.
      */
     #[Route('/alerts/retry-quarantine', name: 'app_alerts_retry', methods: ['POST'])]
-    public function retry(Request $request, Settings $settings): RedirectResponse
+    public function retry(Request $request, Settings $settings, TranslatorInterface $translator): RedirectResponse
     {
         if (!$this->isCsrfTokenValid('alerts', (string) $request->request->get('_token'))) {
             throw $this->createAccessDeniedException('Invalid CSRF token');
         }
         $settings->set(Settings::QUARANTINE_RETRY_REQUESTED, true);
-        $this->addFlash('success', 'Karantino failai bus paimti dar kartą per kelias sekundes.');
+        $this->addFlash('success', $translator->trans('alerts.flash.retry'));
 
         return $this->redirectToRoute('app_alerts');
     }
@@ -43,7 +44,7 @@ class AlertController extends AbstractController
      * Nothing is deleted.
      */
     #[Route('/alerts/seen/{what}', name: 'app_alerts_seen', requirements: ['what' => 'broken|lost'], methods: ['POST'])]
-    public function seen(string $what, Request $request, Settings $settings): RedirectResponse
+    public function seen(string $what, Request $request, Settings $settings, TranslatorInterface $translator): RedirectResponse
     {
         if (!$this->isCsrfTokenValid('alerts', (string) $request->request->get('_token'))) {
             throw $this->createAccessDeniedException('Invalid CSRF token');
@@ -53,7 +54,7 @@ class AlertController extends AbstractController
         } else {
             $settings->set(Settings::USAGE_LOST_SEEN, (int) $settings->get(Settings::USAGE_LOST));
         }
-        $this->addFlash('success', 'Pažymėta. Įspėjimas užsidarys per minutę.');
+        $this->addFlash('success', $translator->trans('alerts.flash.seen'));
 
         return $this->redirectToRoute('app_alerts');
     }

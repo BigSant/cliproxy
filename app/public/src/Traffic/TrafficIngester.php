@@ -268,7 +268,7 @@ class TrafficIngester
             $this->reenrich($exchange);
             if (null !== $timeline) {
                 $exchange->endpoint = mb_substr($log->path().' (ws)', 0, 64);
-                $exchange->error = $exchange->error ?: 'Ryšys be nė vienos užklausos';
+                $exchange->error = $exchange->error ?: ExchangeError::NO_REQUESTS;
             }
             $exchange->archivePath = $archived;
             $entityManager->persist($exchange);
@@ -315,7 +315,7 @@ class TrafficIngester
         $exchange->client = mb_substr($log->headers['user-agent'] ?? '', 0, 64);
         $exchange->requestTail = preg_match('/-([A-Za-z0-9]{1,8})\.log$/', $name, $match) ? $match[1] : '';
         $exchange->provider = str_contains($log->path(), '/messages') ? 'claude' : 'codex';
-        $exchange->error = \sprintf('Failas per didelis išskaidyti (%d MB) – jis archyve, užklausos skaitomos tik iš jo.', intdiv($size, 1_048_576));
+        $exchange->error = ExchangeError::tooLarge($size);
         $exchange->requestBytes = $size;
         $exchange->archivePath = $archived;
         $entityManager = $this->doctrine->getManager();
@@ -438,7 +438,7 @@ class TrafficIngester
         }
         $completed = \in_array($turn->stopReason, ['completed', 'incomplete'], true) || str_starts_with($turn->stopReason, 'incomplete');
         if ('' === $turn->error && !$completed) {
-            $turn->error = '' !== $timelineTurn['disconnect'] ? 'Ryšys nutrūko: '.$timelineTurn['disconnect'] : 'Atsakymas nebaigtas';
+            $turn->error = '' !== $timelineTurn['disconnect'] ? ExchangeError::disconnected($timelineTurn['disconnect']) : ExchangeError::UNFINISHED;
         }
         $exchange->statusCode = $completed && '' === $turn->error ? 200 : 0;
         $exchange->failed = !$completed || '' !== $turn->error;

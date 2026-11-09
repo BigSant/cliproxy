@@ -15,6 +15,7 @@ use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\Routing\Attribute\Route;
+use Symfony\Contracts\Translation\TranslatorInterface;
 
 /**
  * Kvotos: each provider's accounts as one pool, recorded and projected over two weeks, with when it runs empty, the
@@ -23,14 +24,15 @@ use Symfony\Component\Routing\Attribute\Route;
 class QuotaController extends AbstractController
 {
     public const array PROVIDERS = ['claude' => 'Claude', 'codex' => 'Codex'];
-    public const array VIEWS = ['remaining' => 'Likutis', 'drain' => 'Sąnaudos', 'accounts' => 'Paskyros'];
+    /** The views and windows with their names' translation keys. */
+    public const array VIEWS = ['remaining' => 'quota.view.remaining', 'drain' => 'quota.view.drain', 'accounts' => 'quota.view.accounts'];
     public const array BURN = [1, 3, 6];
-    public const array WINDOW_LABELS = [QuotaWindow::WEEK => '7 d.', QuotaWindow::FIVE_HOUR => '5 val.', QuotaWindow::WEEK_FABLE => '7 d. Fable'];
+    public const array WINDOW_LABELS = [QuotaWindow::WEEK => 'window.7d', QuotaWindow::FIVE_HOUR => 'window.5h', QuotaWindow::WEEK_FABLE => 'window.7d-fable'];
     public const array COLORS = ['claude' => '#e07a55', 'codex' => '#6f9cf7'];
     private const array ACCOUNT_COLORS = ['#e07a55', '#6f9cf7', '#4fc08d', '#d9a83a', '#b07ce8', '#e86a9a', '#3fb8c9', '#a3a3a3'];
 
     #[Route('/quota', name: 'app_quota', methods: ['GET'])]
-    public function __invoke(Request $request, ManagementClient $client, QuotaSnapshotRepository $snapshots, Settings $settings, ClockInterface $clock): Response
+    public function __invoke(Request $request, ManagementClient $client, QuotaSnapshotRepository $snapshots, Settings $settings, ClockInterface $clock, TranslatorInterface $translator): Response
     {
         $provider = (string) $request->query->get('provider', 'all');
         $provider = isset(self::PROVIDERS[$provider]) ? $provider : 'all';
@@ -72,7 +74,7 @@ class QuotaController extends AbstractController
                 'accounts' => \count($mine),
                 'window' => $cardWindow,
                 'forecast' => $forecast,
-                'chart' => self::chart($forecast, $view, $key, $from, $to, $now->getTimestamp()),
+                'chart' => self::chart($forecast, $view, $key, $from, $to, $now->getTimestamp(), $translator),
             ];
         }
 
@@ -92,30 +94,31 @@ class QuotaController extends AbstractController
         ]);
     }
 
-    private static function chart(PoolForecast $forecast, string $view, string $provider, int $from, int $to, int $now): TimeChart
+    private static function chart(PoolForecast $forecast, string $view, string $provider, int $from, int $to, int $now, TranslatorInterface $translator): TimeChart
     {
         $color = self::COLORS[$provider];
+        $weekdays = array_map(static fn (int $day) => $translator->trans('weekday.'.$day), range(0, 6));
         if ('drain' === $view) {
             $max = max(5.0, ...array_map(static fn (array $p) => $p['v'], $forecast->drain ?: [['v' => 0]]));
-            $chart = new TimeChart($from, $to, ceil($max / 5) * 5, '%/h', $now);
-            $chart->add('drain', 'Sąnaudos', $forecast->drain, $color, area: true);
+            $chart = new TimeChart($from, $to, ceil($max / 5) * 5, '%/h', $now, $weekdays);
+            $chart->add('drain', $translator->trans('quota.view.drain'), $forecast->drain, $color, area: true);
 
             return $chart;
         }
         if ('accounts' === $view) {
-            $chart = new TimeChart($from, $to, 100, '%', $now);
+            $chart = new TimeChart($from, $to, 100, '%', $now, $weekdays);
             $index = 0;
             foreach ($forecast->accounts as $authIndex => $account) {
                 $accountColor = self::ACCOUNT_COLORS[$index++ % \count(self::ACCOUNT_COLORS)];
                 $chart->add("r$authIndex", $account['label'], $account['recorded'], $accountColor);
-                $chart->add("p$authIndex", $account['label'].' (prognozė)', $account['projected'], $accountColor, dashed: true);
+                $chart->add("p$authIndex", $translator->trans('quota.series.account_forecast', ['%account%' => $account['label']]), $account['projected'], $accountColor, dashed: true);
             }
 
             return $chart;
         }
-        $chart = new TimeChart($from, $to, max(100, $forecast->poolMax), '%', $now);
-        $chart->add('recorded', 'Užfiksuota', $forecast->recorded, $color, area: true);
-        $chart->add('projected', 'Prognozė', $forecast->projected, $color, dashed: true, area: true);
+        $chart = new TimeChart($from, $to, max(100, $forecast->poolMax), '%', $now, $weekdays);
+        $chart->add('recorded', $translator->trans('quota.series.recorded'), $forecast->recorded, $color, area: true);
+        $chart->add('projected', $translator->trans('quota.series.forecast'), $forecast->projected, $color, dashed: true, area: true);
         foreach ($forecast->resets as $reset) {
             $chart->mark($reset['t'], $reset['v'], '+'.round($reset['gain']).'%');
         }

@@ -3,6 +3,7 @@
 namespace App\Controller;
 
 use App\CliProxy\ConfigBaseline;
+use App\CliProxy\ConfigConflictException;
 use App\CliProxy\ManagementClient;
 use App\CliProxy\ManagementException;
 use App\Settings\Settings;
@@ -11,6 +12,7 @@ use Symfony\Component\HttpFoundation\RedirectResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\Routing\Attribute\Route;
+use Symfony\Contracts\Translation\TranslatorInterface;
 
 /**
  * Nustatymai: CLIProxyAPI's routing (strategy, session affinity, retries), the client keys, the dashboard's own
@@ -19,15 +21,17 @@ use Symfony\Component\Routing\Attribute\Route;
 #[Route('/settings')]
 class SettingsController extends AbstractController
 {
+    /** CLIProxyAPI's routing strategies and their names' translation keys. */
     public const array STRATEGIES = [
-        'round-robin' => 'Round-robin (po lygiai)',
-        'fill-first' => 'Fill-first (pirma viena paskyra)',
-        'weighted-round-robin' => 'Weighted round-robin (pagal svorį)',
+        'round-robin' => 'settings.strategy.round_robin',
+        'fill-first' => 'settings.strategy.fill_first',
+        'weighted-round-robin' => 'settings.strategy.weighted',
     ];
 
     public function __construct(
         private readonly ManagementClient $client,
         private readonly Settings $settings,
+        private readonly TranslatorInterface $translator,
     ) {
     }
 
@@ -72,7 +76,7 @@ class SettingsController extends AbstractController
         $strategy = (string) $request->request->get('strategy');
         $ttl = trim((string) $request->request->get('affinity_ttl'));
         if (!isset(self::STRATEGIES[$strategy]) || !preg_match('/^\d+(s|m|h)$/', $ttl)) {
-            $this->addFlash('error', 'Neteisinga strategija arba TTL (pvz. 1h, 30m).');
+            $this->addFlash('error', $this->translator->trans('settings.flash.routing_invalid'));
 
             return $this->redirectToRoute('app_settings');
         }
@@ -85,7 +89,7 @@ class SettingsController extends AbstractController
                 'retry' => ['request-retry' => max(0, min(10, $request->request->getInt('request_retry')))],
             ],
             'observability' => ['usage' => ['usage-statistics-enabled' => true]],
-        ]), 'Maršrutizavimas išsaugotas.');
+        ]), 'settings.flash.routing_saved');
     }
 
     #[Route('/dashboard', name: 'app_settings_dashboard', methods: ['POST'])]
@@ -94,7 +98,7 @@ class SettingsController extends AbstractController
         $this->checkToken($request);
         $this->settings->set(Settings::AUTO_PRIORITY, $request->request->getBoolean('auto_priority'));
         $this->settings->set(Settings::QUOTA_REFRESH_MINUTES, max(1, min(60, $request->request->getInt('refresh_minutes', 5))));
-        $this->addFlash('success', 'Hub\'o nustatymai išsaugoti. Prioritetai persiskaičiuos kitą kartą skaitant limitus.');
+        $this->addFlash('success', $this->translator->trans('settings.flash.dashboard_saved'));
 
         return $this->redirectToRoute('app_settings');
     }
@@ -111,7 +115,7 @@ class SettingsController extends AbstractController
             'request-log' => $enabled,
             // 0: CLIProxyAPI's cleaner never deletes log files; the collector moves them into the archive.
             'logs-max-total-size-mb' => 0,
-        ]]]), 'Srauto žurnalo nustatymai išsaugoti.');
+        ]]]), 'settings.flash.traffic_saved');
     }
 
     #[Route('/keys/add', name: 'app_settings_keys_add', methods: ['POST'])]
@@ -123,7 +127,7 @@ class SettingsController extends AbstractController
             $keys = $this->client->apiKeys();
             $keys[] = 'cpa-'.bin2hex(random_bytes(24));
             $this->client->setApiKeys($keys);
-        }, 'Naujas raktas sukurtas.');
+        }, 'settings.flash.key_added');
     }
 
     #[Route('/keys/delete', name: 'app_settings_keys_delete', methods: ['POST'])]
@@ -137,10 +141,10 @@ class SettingsController extends AbstractController
             $remaining = array_values(array_filter($keys, static fn (string $existing) => !hash_equals($existing, $key)));
             if ([] === $remaining) {
                 // An empty list turns client authentication off altogether.
-                throw new ManagementException('Paskutinio rakto ištrinti negalima: tuščias sąrašas išjungtų autentifikaciją.');
+                throw new ManagementException($this->translator->trans('settings.flash.last_key'));
             }
             $this->client->setApiKeys($remaining);
-        }, 'Raktas ištrintas.');
+        }, 'settings.flash.key_deleted');
     }
 
     #[Route('/yaml', name: 'app_settings_yaml', methods: ['POST'])]
@@ -153,13 +157,15 @@ class SettingsController extends AbstractController
         try {
             $parsed = \Symfony\Component\Yaml\Yaml::parse($yaml);
         } catch (\Symfony\Component\Yaml\Exception\ParseException $exception) {
-            $this->addFlash('error', 'config.yaml neišsaugotas: '.$exception->getMessage());
+            $this->addFlash('error', $this->translator->trans('settings.flash.yaml_invalid', ['%error%' => $exception->getMessage()]));
 
             return $this->redirectToRoute('app_settings');
         }
         $violations = ConfigBaseline::policyViolations(\is_array($parsed) ? $parsed : [], false !== $this->settings->get(Settings::REQUEST_LOG));
         if ([] !== $violations) {
-            $this->addFlash('error', 'config.yaml neišsaugotas – pažeistų hub\'o duomenų politiką: '.implode('; ', $violations).'.');
+            $this->addFlash('error', $this->translator->trans('settings.flash.yaml_policy', [
+                '%violations%' => implode('; ', array_map(fn (string $violation) => $this->translator->trans($violation), $violations)),
+            ]));
 
             return $this->redirectToRoute('app_settings');
         }
@@ -167,7 +173,7 @@ class SettingsController extends AbstractController
         return $this->attempt(function () use ($yaml, $etag) {
             $keys = $this->client->apiKeys();
             $this->client->putConfigYaml(self::unmaskKeys($yaml, $keys), $etag);
-        }, 'config.yaml išsaugotas.');
+        }, 'settings.flash.yaml_saved');
     }
 
     #[Route('/ntfy', name: 'app_settings_ntfy', methods: ['POST'])]
@@ -176,12 +182,12 @@ class SettingsController extends AbstractController
         $this->checkToken($request);
         $url = trim((string) $request->request->get('ntfy_url'));
         if ('' !== $url && !preg_match('#^https?://[^\s/]+/[A-Za-z0-9_-]{1,64}$#', $url)) {
-            $this->addFlash('error', 'ntfy adresas turi būti toks: https://ntfy.sh/<tema>.');
+            $this->addFlash('error', $this->translator->trans('settings.flash.ntfy_invalid'));
 
             return $this->redirectToRoute('app_settings');
         }
         $this->settings->set(Settings::NTFY_URL, $url);
-        $this->addFlash('success', '' === $url ? 'Pranešimai į telefoną išjungti.' : 'Įspėjimai bus siunčiami į '.$url.'.');
+        $this->addFlash('success', '' === $url ? $this->translator->trans('settings.flash.ntfy_off') : $this->translator->trans('settings.flash.ntfy_on', ['%url%' => $url]));
 
         return $this->redirectToRoute('app_settings');
     }
@@ -216,11 +222,14 @@ class SettingsController extends AbstractController
         }
     }
 
+    /** @param string $success the translation key of the flash when it worked */
     private function attempt(callable $action, string $success): RedirectResponse
     {
         try {
             $action();
-            $this->addFlash('success', $success);
+            $this->addFlash('success', $this->translator->trans($success));
+        } catch (ConfigConflictException) {
+            $this->addFlash('error', $this->translator->trans('settings.flash.yaml_conflict'));
         } catch (ManagementException $exception) {
             $this->addFlash('error', $exception->getMessage());
         }

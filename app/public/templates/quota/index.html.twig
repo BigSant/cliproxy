@@ -1,7 +1,7 @@
 {% extends 'base.html.twig' %}
 {% import '_parts/icons.html.twig' as ui %}
 
-{% block title %}Kvotos{% endblock %}
+{% block title %}{{ 'nav.quota'|trans }}{% endblock %}
 
 {% macro q(params, over) %}{{ path('app_quota', params|merge(over)) }}{% endmacro %}
 {% set params = {provider: provider, view: view, burn: burn, window: window, shift: shift} %}
@@ -9,18 +9,18 @@
 {% block body %}
     <div class="page-head">
         <div class="title-line">
-            <h1>Kvotų valdymas</h1>
-            <span class="muted">{{ total }} paskyros · limitai perskaityti {{ quotaRefreshedAt|ago|trim('.', 'right') }}.</span>
+            <h1>{{ 'quota.title'|trans }}</h1>
+            <span class="muted">{{ 'quota.summary'|trans({'%count%': total, '%ago%': quotaRefreshedAt|ago|trim('.', 'right')}) }}</span>
         </div>
         <form method="post" action="{{ path('app_accounts_quotas') }}">
             <input type="hidden" name="_token" value="{{ csrf_token('accounts') }}">
             <input type="hidden" name="back" value="quota">
-            <button class="button primary">{{ ui.icon('refresh') }} Perskaityti visas paskyras</button>
+            <button class="button primary">{{ ui.icon('refresh') }} {{ 'quota.read_all'|trans }}</button>
         </form>
     </div>
 
     <nav class="tabs">
-        <a href="{{ _self.q(params, {provider: 'all'}) }}" class="{{ provider == 'all' ? 'active' }}">Visos <span class="count">{{ total }}</span></a>
+        <a href="{{ _self.q(params, {provider: 'all'}) }}" class="{{ provider == 'all' ? 'active' }}">{{ 'quota.all'|trans }} <span class="count">{{ total }}</span></a>
         {% for key, label in constant('App\\Controller\\QuotaController::PROVIDERS') %}
             <a href="{{ _self.q(params, {provider: key}) }}" class="{{ provider == key ? 'active' }}"><span class="provider-dot provider-{{ key }}"></span>{{ label }} <span class="count">{{ counts[key] }}</span></a>
         {% endfor %}
@@ -29,26 +29,26 @@
     <div class="toolbar">
         <div class="segmented">
             {% for key, label in constant('App\\Controller\\QuotaController::VIEWS') %}
-                <a href="{{ _self.q(params, {view: key}) }}" class="{{ view == key ? 'active' }}">{{ label }}</a>
+                <a href="{{ _self.q(params, {view: key}) }}" class="{{ view == key ? 'active' }}">{{ label|trans }}</a>
             {% endfor %}
         </div>
-        <span class="toolbar-label">Langas</span>
+        <span class="toolbar-label">{{ 'quota.window'|trans }}</span>
         <div class="segmented">
             {% for key, label in constant('App\\Controller\\QuotaController::WINDOW_LABELS') %}
-                <a href="{{ _self.q(params, {window: key}) }}" class="{{ window == key ? 'active' }}">{{ label }}</a>
+                <a href="{{ _self.q(params, {window: key}) }}" class="{{ window == key ? 'active' }}">{{ label|trans }}</a>
             {% endfor %}
         </div>
         <span class="toolbar-label">Burn rate</span>
         <div class="segmented">
             {% for hours in constant('App\\Controller\\QuotaController::BURN') %}
-                <a href="{{ _self.q(params, {burn: hours}) }}" class="{{ burn == hours ? 'active' }}">{{ hours }} val.</a>
+                <a href="{{ _self.q(params, {burn: hours}) }}" class="{{ burn == hours ? 'active' }}">{{ 'quota.burn_hours'|trans({'%count%': hours}) }}</a>
             {% endfor %}
         </div>
         <div class="range-nav">
             <span class="muted">{{ from|date('m-d') }} – {{ to|date('m-d') }}</span>
-            <a class="icon-button" href="{{ _self.q(params, {shift: shift - 1}) }}" title="Savaitė atgal">{{ ui.icon('chevronLeft') }}</a>
-            <a class="button {{ shift == 0 ? 'active' }}" href="{{ _self.q(params, {shift: 0}) }}">Šiandien</a>
-            <a class="icon-button" href="{{ _self.q(params, {shift: shift + 1}) }}" title="Savaitė pirmyn">{{ ui.icon('chevronRight') }}</a>
+            <a class="icon-button" href="{{ _self.q(params, {shift: shift - 1}) }}" title="{{ 'quota.week_back'|trans }}">{{ ui.icon('chevronLeft') }}</a>
+            <a class="button {{ shift == 0 ? 'active' }}" href="{{ _self.q(params, {shift: 0}) }}">{{ 'quota.today'|trans }}</a>
+            <a class="icon-button" href="{{ _self.q(params, {shift: shift + 1}) }}" title="{{ 'quota.week_forward'|trans }}">{{ ui.icon('chevronRight') }}</a>
         </div>
     </div>
 
@@ -57,18 +57,18 @@
         <section class="card pool-card">
             <div class="pool-head">
                 <div>
-                    <div class="pool-title"><span class="provider-dot provider-{{ card.key }}"></span>{{ card.label }} <span class="muted">{{ card.accounts }} paskyros · {{ constant('App\\Controller\\QuotaController::WINDOW_LABELS')[card.window] }} langas</span></div>
+                    <div class="pool-title"><span class="provider-dot provider-{{ card.key }}"></span>{{ card.label }} <span class="muted">{{ 'quota.card_meta'|trans({'%count%': card.accounts, '%window%': constant('App\\Controller\\QuotaController::WINDOW_LABELS')[card.window]|trans}) }}</span></div>
                     {% if f.poolMax > 0 %}
-                        <div class="pool-value">{{ f.poolNow|number_format(0) }}%<span class="muted"> iš {{ f.poolMax|number_format(0) }}%</span></div>
+                        <div class="pool-value">{{ f.poolNow|decimal }}%<span class="muted">{{ 'quota.of_max'|trans({'%max%': f.poolMax|decimal}) }}</span></div>
                     {% else %}
                         <div class="pool-value muted">–</div>
                     {% endif %}
                 </div>
                 <dl class="pool-stats">
-                    <div><dt>Pool ištuštės</dt><dd>{% if f.poolEmptyAt %}{{ f.poolEmptyAt|when }}{% elseif f.burn > 0 %}ne iki {{ to|date('m-d') }}{% else %}–{% endif %}</dd></div>
-                    <div><dt>Pirma ištuštės</dt><dd>{% if f.firstEmpty %}<span class="email">{{ f.firstEmpty.label }}</span> {{ f.firstEmpty.t|until }}{% else %}–{% endif %}</dd></div>
-                    <div><dt>Kitas atsinaujinimas</dt><dd>{% if f.nextReset %}+{{ f.nextReset.gain|number_format(0) }}% {{ f.nextReset.t|when }}{% else %}–{% endif %}</dd></div>
-                    <div><dt>Burn, {{ burn }} val.</dt><dd>{{ f.burn|number_format(1, ',') }}%/val.</dd></div>
+                    <div><dt>{{ 'quota.pool_empty'|trans }}</dt><dd>{% if f.poolEmptyAt %}{{ f.poolEmptyAt|when }}{% elseif f.burn > 0 %}{{ 'quota.not_before'|trans({'%date%': to|date('m-d')}) }}{% else %}–{% endif %}</dd></div>
+                    <div><dt>{{ 'quota.first_empty'|trans }}</dt><dd>{% if f.firstEmpty %}<span class="email">{{ f.firstEmpty.label }}</span> {{ f.firstEmpty.t|until }}{% else %}–{% endif %}</dd></div>
+                    <div><dt>{{ 'quota.next_reset'|trans }}</dt><dd>{% if f.nextReset %}+{{ f.nextReset.gain|decimal }}% {{ f.nextReset.t|when }}{% else %}–{% endif %}</dd></div>
+                    <div><dt>{{ 'quota.burn'|trans({'%count%': burn}) }}</dt><dd>{{ 'quota.burn_rate'|trans({'%value%': f.burn|decimal(1)}) }}</dd></div>
                 </dl>
             </div>
             {% if f.poolMax > 0 %}
@@ -76,26 +76,26 @@
                 <div class="legend">
                     {% if view == 'remaining' %}
                         <span>Pool</span>
-                        <span><i class="line" style="--c: {{ constant('App\\Controller\\QuotaController::COLORS')[card.key] }}"></i> Užfiksuota</span>
-                        <span><i class="line dashed" style="--c: {{ constant('App\\Controller\\QuotaController::COLORS')[card.key] }}"></i> Prognozė</span>
+                        <span><i class="line" style="--c: {{ constant('App\\Controller\\QuotaController::COLORS')[card.key] }}"></i> {{ 'quota.series.recorded'|trans }}</span>
+                        <span><i class="line dashed" style="--c: {{ constant('App\\Controller\\QuotaController::COLORS')[card.key] }}"></i> {{ 'quota.series.forecast'|trans }}</span>
                     {% elseif view == 'drain' %}
-                        <span>Sąnaudos per valandą (visų paskyrų suma)</span>
+                        <span>{{ 'quota.drain_legend'|trans }}</span>
                     {% else %}
                         {% for series in card.chart.series|filter(s => not s.dashed) %}
                             <span><i class="line" style="--c: {{ series.color }}"></i> <span class="email">{{ series.label }}</span></span>
                         {% endfor %}
-                        <span class="muted">punktyras – prognozė</span>
+                        <span class="muted">{{ 'quota.dashed_forecast'|trans }}</span>
                     {% endif %}
                 </div>
-                {% if f.unknown %}<p class="muted small">{{ f.unknown }} paskyrų šio lango limitų dar nėra – jos nevertinamos.</p>{% endif %}
+                {% if f.unknown %}<p class="muted small">{{ 'quota.unknown'|trans({'%count%': f.unknown}) }}</p>{% endif %}
             {% else %}
-                <p class="muted">Šio lango limitų dar nėra. Jie atsiras, kai kolektorius perskaitys paskyras (kas kelias minutes).</p>
+                <p class="muted">{{ 'quota.no_limits'|trans }}</p>
             {% endif %}
         </section>
     {% else %}
         <section class="card empty">
-            <p>Paskyrų dar nėra.</p>
-            <a class="button primary" href="{{ path('app_accounts') }}">Prijungti paskyrą</a>
+            <p>{{ 'quota.no_accounts'|trans }}</p>
+            <a class="button primary" href="{{ path('app_accounts') }}">{{ 'quota.connect_account'|trans }}</a>
         </section>
     {% endfor %}
 {% endblock %}

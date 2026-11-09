@@ -29,7 +29,7 @@ security:
                 path: app_logout
 
     access_control:
-        - { path: ^/(login|_health)$, roles: PUBLIC_ACCESS }
+        - { path: ^/(login|_health|locale/(lt|en))$, roles: PUBLIC_ACCESS }
         - { path: ^/, roles: ROLE_ADMIN }
 
 when@test:

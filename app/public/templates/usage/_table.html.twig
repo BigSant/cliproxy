@@ -1,13 +1,13 @@
 {% if rows is empty %}
-    <p class="muted">Nėra duomenų.</p>
+    <p class="muted">{{ 'common.no_data'|trans }}</p>
 {% else %}
     <div class="table-wrap">
         <table>
-            <thead><tr><th>{{ label_title }}</th><th class="num">Užkl.</th><th class="num">Tokenai</th><th class="num">Cache skait.</th><th class="num">Cache raš.</th></tr></thead>
+            <thead><tr><th>{{ label_title }}</th><th class="num">{{ 'usage.requests_short'|trans }}</th><th class="num">{{ 'common.tokens'|trans }}</th><th class="num">{{ 'common.cache_read'|trans }}</th><th class="num">{{ 'common.cache_write'|trans }}</th></tr></thead>
             <tbody>
                 {% for row in rows %}
                     <tr>
-                        <td><span class="provider provider-{{ row.provider }}"><span class="{{ label == 'account' ? 'email' }}">{{ row[label] ?: '–' }}</span></span>{% if row.effort|default('') %} <span class="kind kind-effort" title="Reasoning effort">{{ row.effort|default('') }}</span>{% endif %}</td>
+                        <td><span class="provider provider-{{ row.provider }}"><span class="{{ label == 'account' ? 'email' }}">{{ row[label] ?: '–' }}</span></span>{% if row.effort|default('') %} <span class="kind kind-effort" title="{{ 'common.reasoning_effort'|trans }}">{{ row.effort|default('') }}</span>{% endif %}</td>
                         <td class="num">{{ row.requests|tokens }}{% if row.failed %} <span class="bad">/ {{ row.failed }}</span>{% endif %}</td>
                         <td class="num">{{ row.total|tokens }}</td>
                         <td class="num">{{ row.cache_read|tokens }}</td>

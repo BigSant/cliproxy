@@ -1,22 +1,22 @@
 {% extends 'base.html.twig' %}
 
-{% block title %}Sesijos{% endblock %}
+{% block title %}{{ 'nav.sessions'|trans }}{% endblock %}
 
 {% block body %}
     <div class="page-head">
-        <div class="title-line"><h1>Sesijos</h1><span class="muted">{{ sessions|length }}</span></div>
+        <div class="title-line"><h1>{{ 'nav.sessions'|trans }}</h1><span class="muted">{{ sessions|length }}</span></div>
         {% include 'traffic/_filters.html.twig' %}
     </div>
     <section class="card flush">
         <div class="table-wrap">
             <table>
-                <thead><tr><th>Pabaiga</th><th>Sesija</th><th>Modelis / paskyra</th><th class="num">Prompt'ai</th><th class="num">Užklausos</th><th class="num">Įrankiai</th><th class="num">Įr. klaidos</th><th class="num">Tokenai</th><th class="num">Cache skait.</th></tr></thead>
+                <thead><tr><th>{{ 'traffic.sessions.ended'|trans }}</th><th>{{ 'common.session'|trans }}</th><th>{{ 'common.model_account'|trans }}</th><th class="num">{{ 'traffic.sessions.prompts'|trans }}</th><th class="num">{{ 'common.requests'|trans }}</th><th class="num">{{ 'common.tools'|trans }}</th><th class="num">{{ 'traffic.sessions.tool_errors'|trans }}</th><th class="num">{{ 'common.tokens'|trans }}</th><th class="num">{{ 'common.cache_read'|trans }}</th></tr></thead>
                 <tbody>
                     {% for s in sessions %}
                         <tr class="row-link" data-href="{{ path('app_traffic_session', {sessionId: s.session_id}) }}">
-                            <td class="nowrap">{{ s.ended|date('m-d H:i') }}<div class="muted small">nuo {{ s.started|date('H:i') }}</div></td>
+                            <td class="nowrap">{{ s.ended|date('m-d H:i') }}<div class="muted small">{{ 'common.since'|trans({'%time%': s.started|date('H:i')}) }}</div></td>
                             <td><a href="{{ path('app_traffic_session', {sessionId: s.session_id}) }}"><code>{{ s.session_id|u.truncate(13, '…') }}</code></a></td>
-                            <td><span class="provider provider-{{ s.provider }}">{{ s.model }}</span>{% if s.effort %} <span class="kind kind-effort" title="Reasoning effort">{{ s.effort }}</span>{% endif %}<div class="muted small email">{{ s.account ?: '–' }}</div></td>
+                            <td><span class="provider provider-{{ s.provider }}">{{ s.model }}</span>{% if s.effort %} <span class="kind kind-effort" title="{{ 'common.reasoning_effort'|trans }}">{{ s.effort }}</span>{% endif %}<div class="muted small email">{{ s.account ?: '–' }}</div></td>
                             <td class="num">{{ s.prompts }}</td>
                             <td class="num">{{ s.requests }}{% if s.failed %} <span class="bad">/ {{ s.failed }}</span>{% endif %}</td>
                             <td class="num">{{ s.tool_calls }}</td>
@@ -25,7 +25,7 @@
                             <td class="num">{{ s.cache_read|share(s.cache_read + s.cache_creation) }}</td>
                         </tr>
                     {% else %}
-                        <tr><td colspan="9" class="muted empty">Sesijų nėra.</td></tr>
+                        <tr><td colspan="9" class="muted empty">{{ 'traffic.sessions.none'|trans }}</td></tr>
                     {% endfor %}
                 </tbody>
             </table>

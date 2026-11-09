@@ -1,6 +1,6 @@
 {# A TimeChart (src/Chart/TimeChart.php) as SVG; app.js adds the hover read-out from data-points. #}
 <div class="chart-box" data-time-chart data-points="{{ chart.points|json_encode }}" data-from="{{ chart.from }}" data-to="{{ chart.to }}" data-left="{{ chart.left }}" data-right="{{ chart.right }}" data-unit="{{ chart.unit }}">
-    <svg viewBox="0 0 {{ constant('App\\Chart\\TimeChart::WIDTH') }} {{ constant('App\\Chart\\TimeChart::HEIGHT') }}" class="time-chart" role="img" aria-label="{{ label|default('Grafikas') }}">
+    <svg viewBox="0 0 {{ constant('App\\Chart\\TimeChart::WIDTH') }} {{ constant('App\\Chart\\TimeChart::HEIGHT') }}" class="time-chart" role="img" aria-label="{{ label|default('chart.label'|trans) }}">
         <defs>
             {% for series in chart.series %}
                 {% if series.area %}
@@ -25,7 +25,7 @@
         {% endfor %}
         {% if chart.nowX is not null %}
             <line x1="{{ chart.nowX }}" x2="{{ chart.nowX }}" y1="{{ chart.y(chart.max) - 12 }}" y2="{{ chart.bottom }}" class="now-line"/>
-            <text x="{{ chart.nowX }}" y="{{ chart.y(chart.max) - 16 }}" class="axis now-label" text-anchor="middle">Dabar</text>
+            <text x="{{ chart.nowX }}" y="{{ chart.y(chart.max) - 16 }}" class="axis now-label" text-anchor="middle">{{ 'chart.now'|trans }}</text>
         {% endif %}
         {% for marker in chart.markers %}
             <text x="{{ marker.x }}" y="{{ max(chart.y(chart.max) + 2, marker.y - 10) }}" class="marker" text-anchor="middle">{{ marker.text }}</text>

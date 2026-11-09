@@ -1,5 +1,10 @@
 import './styles/app.css';
 
+// The page's language (LT | EN): number and time formats, and the few texts written here, which base.html.twig
+// puts on <html> from the translations.
+const page = document.documentElement;
+const locale = page.lang === 'en' ? 'en-GB' : 'lt-LT';
+
 // Copy buttons: data-copy holds the text.
 document.addEventListener('click', async (event) => {
     const button = event.target.closest('[data-copy]');
@@ -9,10 +14,10 @@ document.addEventListener('click', async (event) => {
     try {
         await navigator.clipboard.writeText(button.dataset.copy);
         const label = button.textContent;
-        button.textContent = 'Nukopijuota';
+        button.textContent = page.dataset.copied;
         setTimeout(() => { button.textContent = label; }, 1500);
     } catch {
-        window.prompt('Nukopijuok:', button.dataset.copy);
+        window.prompt(page.dataset.copyPrompt, button.dataset.copy);
     }
 });
 
@@ -39,12 +44,12 @@ const live = document.querySelector('[data-live-url]');
 if (live) {
     const body = live.querySelector('tbody');
     const number = (value) => {
-        for (const [size, suffix] of [[1e9, ' mlrd.'], [1e6, ' M'], [1e3, ' k']]) {
+        for (const [size, suffix] of [[1e9, page.dataset.billion], [1e6, ' M'], [1e3, ' k']]) {
             if (Math.abs(value) >= size) {
-                return (value / size).toLocaleString('lt-LT', { maximumFractionDigits: value / size >= 100 ? 0 : 1 }) + suffix;
+                return (value / size).toLocaleString(locale, { maximumFractionDigits: value / size >= 100 ? 0 : 1 }) + suffix;
             }
         }
-        return value.toLocaleString('lt-LT');
+        return value.toLocaleString(locale);
     };
     const cell = (text, className) => {
         const td = document.createElement('td');
@@ -100,14 +105,14 @@ if (live) {
                     modelCell.append(' ', effort);
                 }
                 row.append(
-                    cell(new Date(record.at).toLocaleTimeString('lt-LT')),
+                    cell(new Date(record.at).toLocaleTimeString(locale)),
                     accountCell(record.account),
                     modelCell,
                     cell(number(record.input), 'num'),
                     cell(number(record.output), 'num'),
                     cell(number(record.cacheRead), 'num'),
                     cell(number(record.cacheCreation), 'num'),
-                    cell((record.latencyMs / 1000).toLocaleString('lt-LT', { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + ' s', 'num'),
+                    cell((record.latencyMs / 1000).toLocaleString(locale, { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + ' s', 'num'),
                 );
                 return row;
             }));
@@ -155,7 +160,7 @@ for (const box of document.querySelectorAll('[data-time-chart]')) {
     const right = Number(box.dataset.right);
     const width = svg.viewBox.baseVal.width;
     const unit = box.dataset.unit;
-    const format = new Intl.DateTimeFormat('lt-LT', { weekday: 'short', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+    const format = new Intl.DateTimeFormat(locale, { weekday: 'short', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
     svg.addEventListener('mousemove', (event) => {
         const rect = svg.getBoundingClientRect();
         const x = (event.clientX - rect.left) / rect.width * width;
@@ -183,7 +188,7 @@ for (const box of document.querySelectorAll('[data-time-chart]')) {
         hover.setAttribute('visibility', 'visible');
         tip.hidden = false;
         tip.style.left = `${(x / width) * 100}%`;
-        tip.textContent = `${format.format(new Date(shown[0].t * 1000))} · ` + shown.map((point) => `${shown.length > 1 ? point.s + ': ' : ''}${point.v.toLocaleString('lt-LT')}${unit}`).join(' · ');
+        tip.textContent = `${format.format(new Date(shown[0].t * 1000))} · ` + shown.map((point) => `${shown.length > 1 ? point.s + ': ' : ''}${point.v.toLocaleString(locale)}${unit}`).join(' · ');
     });
     svg.addEventListener('mouseleave', () => {
         hover.setAttribute('visibility', 'hidden');

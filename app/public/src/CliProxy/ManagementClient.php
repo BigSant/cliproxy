@@ -158,7 +158,7 @@ class ManagementClient
     {
         $response = $this->request('PUT', '/config.yaml', body: $yaml, contentType: 'application/yaml', headers: null !== $etag ? ['If-Match' => $etag] : []);
         if (412 === $response->getStatusCode()) {
-            throw new ManagementException('config.yaml pasikeitė, kol jį redagavai (kitas langas ar CLIProxyAPI). Atnaujink puslapį ir pakeisk dar kartą.', 412);
+            throw new ConfigConflictException('config.yaml changed while it was being edited (another window or CLIProxyAPI)', 412);
         }
         $this->check($response);
     }

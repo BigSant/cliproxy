@@ -13,11 +13,15 @@ use Psr\Clock\ClockInterface;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\DependencyInjection\Attribute\Autowire;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
+use Symfony\Contracts\Translation\TranslatorInterface;
 
 /**
  * Turns what the collector sees into alerts: each condition has a stable key; a new one opens an episode (and a push
  * through ntfy when a topic is set in Nustatymai, retried until ntfy takes it), one no longer seen is resolved.
  * Nothing is deleted.
+ *
+ * A condition says what it is as a translation key and parameters (alert.* in translations/): pages show it in their
+ * language, ntfy and the message column get the default one.
  */
 class AlertMonitor
 {
@@ -33,13 +37,17 @@ class AlertMonitor
         private readonly LoggerInterface $logger,
         #[Autowire('%env(TRAFFIC_ARCHIVE_DIR)%')]
         private readonly string $archiveDirectory,
+        private readonly TranslatorInterface $translator,
+        #[Autowire('%kernel.default_locale%')]
+        private readonly string $defaultLocale,
     ) {
     }
 
     /**
-     * The conditions of one collector run; ids not in $conditions get resolved.
+     * The conditions of one collector run; ids not in $conditions get resolved. A condition without a key (an alert
+     * from before the keys, kept while CLIProxyAPI is away) has its message as it is.
      *
-     * @param array<string, array{level: string, message: string}> $conditions
+     * @param array<string, array{level: string, key?: ?string, params?: ?array<string, string|int>, message?: string}> $conditions
      */
     public function sync(array $conditions): void
     {
@@ -50,14 +58,19 @@ class AlertMonitor
             $open[$alert->alertKey] = $alert;
         }
         foreach ($conditions as $id => $condition) {
+            $key = $condition['key'] ?? null;
+            $params = $condition['params'] ?? [];
+            $message = null !== $key ? $this->translator->trans($key, $params, null, $this->defaultLocale) : (string) ($condition['message'] ?? '');
             $alert = $open[$id] ?? null;
             if (null === $alert) {
                 // New, or back after it cleared: a new episode; the earlier ones stay as they ended.
-                $alert = new Alert($id, $condition['level'], $condition['message'], $now);
+                $alert = new Alert($id, $condition['level'], $message, $now);
                 $entityManager->persist($alert);
             }
             $alert->level = $condition['level'];
-            $alert->message = mb_substr($condition['message'], 0, 500);
+            $alert->message = mb_substr($message, 0, 500);
+            $alert->messageKey = $key;
+            $alert->messageParams = null !== $key ? $params : null;
             $alert->lastSeenAt = $now;
             if (null === $alert->notifiedAt && Alert::INFO !== $alert->level && $this->push($alert)) {
                 $alert->notifiedAt = $now;
@@ -80,7 +93,7 @@ class AlertMonitor
      * @param list<Account>                $accounts
      * @param array<string, QuotaSnapshot> $snapshots by auth index
      *
-     * @return array<string, array{level: string, message: string}>
+     * @return array<string, array{level: string, key: string, params: array<string, string>}>
      */
     public function accountConditions(array $accounts, array $snapshots): array
     {
@@ -93,11 +106,13 @@ class AlertMonitor
             }
             $usable[$account->provider] ??= 0;
             if ($account->requiresSignIn) {
-                $conditions['signin:'.$account->name] = ['level' => Alert::ERROR, 'message' => \sprintf('%s: reikia prisijungti iš naujo (Paskyros → „Prisijungti iš naujo“).', $account->label())];
+                $conditions['signin:'.$account->name] = ['level' => Alert::ERROR, 'key' => 'alert.signin', 'params' => ['%account%' => $account->label()]];
                 continue;
             }
             if ('error' === $account->status || $account->unavailable) {
-                $conditions['account:'.$account->name] = ['level' => Alert::WARNING, 'message' => \sprintf('%s: CLIProxyAPI praneša klaidą%s.', $account->label(), '' !== $account->statusMessage ? ' – '.$account->statusMessage : '')];
+                $conditions['account:'.$account->name] = '' !== $account->statusMessage
+                    ? ['level' => Alert::WARNING, 'key' => 'alert.account_error_detail', 'params' => ['%account%' => $account->label(), '%detail%' => $account->statusMessage]]
+                    : ['level' => Alert::WARNING, 'key' => 'alert.account_error', 'params' => ['%account%' => $account->label()]];
             }
             $snapshot = $snapshots[$account->authIndex] ?? null;
             $exhausted = $account->quotaBlocked;
@@ -110,14 +125,14 @@ class AlertMonitor
         }
         foreach ($usable as $provider => $count) {
             if (0 === $count) {
-                $conditions['pool:'.$provider] = ['level' => Alert::ERROR, 'message' => \sprintf('%s: nė viena paskyra neturi likusio limito – užklausos gaus 429.', 'claude' === $provider ? 'Claude' : ('codex' === $provider ? 'Codex' : $provider))];
+                $conditions['pool:'.$provider] = ['level' => Alert::ERROR, 'key' => 'alert.pool_empty', 'params' => ['%provider%' => 'claude' === $provider ? 'Claude' : ('codex' === $provider ? 'Codex' : $provider)]];
             }
         }
 
         return $conditions;
     }
 
-    /** @return array<string, array{level: string, message: string}> free space where the traffic is kept */
+    /** @return array<string, array{level: string, key: string, params: array<string, string>}> free space where the traffic is kept */
     public function diskConditions(): array
     {
         $directory = is_dir($this->archiveDirectory) ? $this->archiveDirectory : \dirname($this->archiveDirectory);
@@ -127,7 +142,7 @@ class AlertMonitor
             return [];
         }
 
-        return ['disk' => ['level' => Alert::WARNING, 'message' => \sprintf('Diske liko %.0f GB (%.0f %%). Žurnalas ir archyvas niekada netrinami – atlaisvink vietos arba perkelk archyvą.', $free / 1e9, $free / $total * 100)]];
+        return ['disk' => ['level' => Alert::WARNING, 'key' => 'alert.disk', 'params' => ['%free%' => \sprintf('%.0f', $free / 1e9), '%share%' => \sprintf('%.0f', $free / $total * 100)]]];
     }
 
     private function push(Alert $alert, bool $resolved = false): bool
@@ -139,7 +154,7 @@ class AlertMonitor
         try {
             $status = $this->httpClient->request('POST', $topic, [
                 'headers' => [
-                    'Title' => ($resolved ? 'Išspręsta: ' : '').'CLIProxy hub',
+                    'Title' => $resolved ? $this->translator->trans('alert.ntfy_resolved', [], null, $this->defaultLocale) : 'CLIProxy hub',
                     'Priority' => $resolved ? 'low' : (Alert::ERROR === $alert->level ? 'high' : 'default'),
                     'Tags' => $resolved ? 'white_check_mark' : (Alert::ERROR === $alert->level ? 'rotating_light' : 'warning'),
                 ],

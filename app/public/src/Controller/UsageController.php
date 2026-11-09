@@ -12,7 +12,8 @@ use Symfony\Component\Routing\Attribute\Route;
 /** Naudojimas: tokens, cache reads and writes per day, account and model, and the session affinity check. */
 class UsageController extends AbstractController
 {
-    public const array RANGES = ['24h' => ['-24 hours', '24 val.'], '7d' => ['-7 days', '7 d.'], '30d' => ['-30 days', '30 d.'], '90d' => ['-90 days', '90 d.'], 'all' => ['-100 years', 'Visi']];
+    /** @var array<string, array{0: string, 1: string}> how far back, and the translation key of its name */
+    public const array RANGES = ['24h' => ['-24 hours', 'range.24h'], '7d' => ['-7 days', 'range.7d'], '30d' => ['-30 days', 'range.30d'], '90d' => ['-90 days', 'range.90d'], 'all' => ['-100 years', 'range.all']];
 
     #[Route('/usage', name: 'app_usage', methods: ['GET'])]
     public function __invoke(Request $request, UsageRecordRepository $usage, ClockInterface $clock): Response
