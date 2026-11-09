@@ -17,10 +17,12 @@ class Settings
     public const string COLLECTOR_ERROR = 'collector_error';
     /** ntfy topic URL for pushes (https://ntfy.sh/<topic> or a self-hosted one); empty: alerts only in Įspėjimai. */
     public const string NTFY_URL = 'ntfy_url';
-    /** CLIProxyAPI's running and newest release, and when the newest was last asked. */
+    /** CLIProxyAPI's running and newest release, and when the newest was last asked (app:cliproxy-update). */
     public const string CLIPROXY_VERSION = 'cliproxy_version';
     public const string CLIPROXY_LATEST = 'cliproxy_latest';
     public const string CLIPROXY_LATEST_CHECKED_AT = 'cliproxy_latest_checked_at';
+    /** The update to the newest release: {version, state (CliProxyUpdateCommand), at, error?}. */
+    public const string CLIPROXY_UPDATE = 'cliproxy_update';
     /** The configuration baseline applied once (ConfigBaseline::ONCE). */
     public const string CONFIG_BASELINE = 'config_baseline';
     /** The collector's hourly replay of today's and yesterday's spool. */

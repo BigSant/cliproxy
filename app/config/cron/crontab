@@ -5,3 +5,5 @@
 # The watchdog does not depend on the collector, its lock or (for pushing) the database: README, "Įspėjimai".
 */5 * * * * cd /var/www/html && php bin/console app:watchdog
 
+# New CLIProxyAPI releases: the update workflow is started once per version (README, "CLIProxyAPI atnaujinimas").
+*/10 * * * * cd /var/www/html && php bin/console app:cliproxy-update

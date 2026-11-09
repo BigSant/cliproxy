@@ -28,9 +28,15 @@ class FakeCliProxy
     public array $external = [];
     /** What ntfy answers. */
     public int $externalStatus = 200;
+    /** The running CLIProxyAPI version, in its response headers. */
+    public string $version = 'v8.0.61';
+    /** CLIProxyAPI's newest release on GitHub, the image tags on Docker Hub and GitHub's answer to a workflow start. */
+    public string $release = 'v8.0.61';
+    /** @var list<string> */
+    public array $imageTags = ['v8.0.61'];
+    public int $dispatchStatus = 204;
     /** Every management call refused, as with a wrong key (CLIProxyAPI still names its version). */
     public bool $rejectAll = false;
-    public string $latestVersion = 'v8.0.61';
     public bool $verified = true;
     /** The last config.yaml saved through PUT. */
     public ?string $savedYaml = null;
@@ -38,8 +44,17 @@ class FakeCliProxy
     public function __invoke(string $method, string $url, array $options = []): ResponseInterface
     {
         if ('cliproxy.test' !== parse_url($url, \PHP_URL_HOST)) {
-            // Anything else the hub calls (ntfy pushes) is recorded and answered.
+            // Anything else the hub calls (ntfy pushes, GitHub, Docker Hub) is recorded and answered.
             $this->external[] = ['method' => $method, 'url' => $url, 'body' => (string) ($options['body'] ?? '')];
+            if (\App\CliProxy\Releases::LATEST_URL === $url) {
+                return $this->json(['tag_name' => $this->release]);
+            }
+            if (str_starts_with($url, \App\CliProxy\Releases::IMAGE_TAG_URL)) {
+                return new MockResponse('{}', ['http_code' => \in_array(rawurldecode(substr($url, \strlen(\App\CliProxy\Releases::IMAGE_TAG_URL))), $this->imageTags, true) ? 200 : 404]);
+            }
+            if (str_ends_with($url, '/dispatches')) {
+                return new MockResponse(204 === $this->dispatchStatus ? '' : '{"message":"Bad credentials"}', ['http_code' => $this->dispatchStatus]);
+            }
 
             return new MockResponse('{}', ['http_code' => $this->externalStatus]);
         }
@@ -48,7 +63,7 @@ class FakeCliProxy
         }
         $headers = $options['normalized_headers']['authorization'] ?? $options['headers'] ?? [];
         if ($this->rejectAll || !\in_array('Authorization: Bearer test-management-key', (array) $headers, true)) {
-            return new MockResponse('{"error":"invalid management key"}', ['http_code' => 401, 'response_headers' => ['x-cpa-version' => 'v8.0.61']]);
+            return new MockResponse('{"error":"invalid management key"}', ['http_code' => 401, 'response_headers' => ['x-cpa-version' => $this->version]]);
         }
         $parts = parse_url($url);
         $path = substr($parts['path'] ?? '', \strlen('/v8/management'));
@@ -65,11 +80,10 @@ class FakeCliProxy
             'GET /oauth/auth-url' => $this->json(['status' => 'ok', 'url' => 'https://claude.ai/oauth/authorize?state=s1', 'state' => 's1']),
             'POST /oauth/callback' => $this->json(['status' => 'ok']),
             'GET /oauth/status' => $this->json(['status' => $this->loginStatus] + ('ok' === $this->loginStatus ? ['auth_id' => 'claude-new.json'] : ['error' => 'Bad request'])),
-            'GET /config' => new MockResponse(json_encode($this->config), ['response_headers' => ['content-type' => 'application/json', 'x-cpa-version' => 'v8.0.61']]),
+            'GET /config' => new MockResponse(json_encode($this->config), ['response_headers' => ['content-type' => 'application/json', 'x-cpa-version' => $this->version]]),
             'PATCH /config' => $this->patchConfig($body),
             'GET /config.yaml' => new MockResponse($this->yaml(), ['response_headers' => ['etag' => '"'.sha1($this->yaml()).'"']]),
             'PUT /config.yaml' => $this->putYaml($options),
-            'GET /server/latest-version' => $this->json(['latest-version' => $this->latestVersion]),
             'POST /routing/cooldown/reset' => $this->json(['status' => 'ok']),
             'POST /credentials/verify' => $this->json(['status' => 'ok', 'verified' => $this->verified]),
             default => new MockResponse('{"error":"not found"}', ['http_code' => 404]),
