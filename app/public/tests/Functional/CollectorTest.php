@@ -69,6 +69,19 @@ class CollectorTest extends KernelTestCase
         self::assertSame(1, $this->cliProxy->credentials[1]['priority']);
     }
 
+    public function testNothingOldIsDeleted(): void
+    {
+        $this->entityManager->persist(UsageRecord::fromQueueRecord(['timestamp' => '2020-01-01T00:00:00Z', 'provider' => 'claude']));
+        $this->entityManager->flush();
+
+        $collector = self::getContainer()->get(Collector::class);
+        $collector->collectUsage();
+        $collector->collectTraffic();
+        $collector->refreshQuotas();
+
+        self::assertSame(1, $this->entityManager->getRepository(UsageRecord::class)->count([]));
+    }
+
     public function testAProviderErrorFallsBackToTheLastHeaders(): void
     {
         $this->cliProxy->credentials = [FakeCliProxy::credential('claude', 'a@x', ['quota' => ['signals' => [

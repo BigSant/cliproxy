@@ -66,14 +66,4 @@ class QuotaSnapshotRepository extends ServiceEntityRepository
 
         return $history;
     }
-
-    public function deleteOlderThan(\DateTimeImmutable $before): int
-    {
-        return $this->createQueryBuilder('s')
-            ->delete()
-            ->where('s.fetchedAt < :before')
-            ->setParameter('before', $before, 'utc_datetime_immutable')
-            ->getQuery()
-            ->execute();
-    }
 }
