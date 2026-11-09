@@ -1,0 +1,18 @@
+{% set account = row.account %}
+<div class="account-cell">
+    <span class="provider provider-{{ account.provider }}">{{ account.provider == 'claude' ? 'Claude' : (account.provider == 'codex' ? 'Codex' : account.provider) }}</span>
+    <div>
+        <div class="account-name">{{ account.label }}</div>
+        <div class="account-meta">
+            {% if account.disabled %}<span class="tag tag-off">išjungta</span>
+            {% elseif account.requiresSignIn %}<span class="tag tag-bad">reikia prisijungti</span>
+            {% elseif account.unavailable or account.status == 'error' %}<span class="tag tag-bad" title="{{ account.statusMessage }}">klaida</span>
+            {% elseif account.cooldowns is not empty %}<span class="tag tag-warn" title="{{ account.cooldowns|first.reason }}">pauzė {{ account.cooldowns|first.retryAt|until }}</span>
+            {% else %}<span class="tag tag-ok">aktyvi</span>{% endif %}
+            {% if row.snapshot and row.snapshot.plan %}<span class="tag">{{ row.snapshot.plan }}</span>{% elseif account.planType %}<span class="tag">{{ account.planType }}</span>{% endif %}
+            <span class="tag" title="Prioritetas: didesnis naudojamas pirmiau">P{{ account.priority }}</span>
+            {% if row.snapshot and row.snapshot.bankedResets %}<span class="tag" title="Sukaupti savaitinio limito atstatymai">{{ row.snapshot.bankedResets }}× reset</span>{% endif %}
+            {% if account.note %}<span class="note">{{ account.note }}</span>{% endif %}
+        </div>
+    </div>
+</div>

@@ -1,0 +1,36 @@
+# CLIProxyAPI configuration (config-version 8). Written once into the state directory by entrypoint.sh; from then on
+# the file there is the one that counts, changed through the dashboard (Nustatymai) or CLIProxyAPI itself.
+config-version: 8
+server:
+  # Inside the container: the project network needs it. On the host the port is published on 127.0.0.1 only.
+  host: ""
+  port: 8317
+management:
+  # The dashboard calls from another container of the project network, never from 127.0.0.1. The key comes from
+  # MANAGEMENT_PASSWORD (environment only); an empty secret-key keeps it out of this file.
+  allow-remote: true
+  secret-key: ""
+  # The dashboard replaces the downloaded management.html.
+  disable-control-panel: true
+access:
+  # What Claude Code (ANTHROPIC_AUTH_TOKEN) and Codex (experimental_bearer_token) send.
+  api-keys: ["@CLIPROXY_API_KEY@"]
+routing:
+  strategy: "round-robin"
+  # Prompt caches belong to one account: keep a session on the account it started on.
+  session-affinity: true
+  session-affinity-ttl: "1h"
+  retry:
+    request-retry: 3
+    max-retry-interval: 30
+oauth:
+  auth-dir: "/CLIProxyAPI/state/auth"
+observability:
+  logs:
+    logging-to-file: true
+    logs-max-total-size-mb: 200
+  usage:
+    # The dashboard's collector (app:collect, cron) takes every record from the queue into the database; an hour of
+    # retention covers a collector that is down for a while.
+    usage-statistics-enabled: true
+    redis-usage-queue-retention-seconds: 3600

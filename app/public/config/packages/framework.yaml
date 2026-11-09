@@ -13,3 +13,10 @@ when@test:
         test: true
         session:
             storage_factory_id: session.storage.factory.mock_file
+        # Every request to CLIProxyAPI goes to the in-memory fake (tests/Support/FakeCliProxy.php).
+        http_client:
+            mock_response_factory: App\Tests\Support\FakeCliProxy
+
+    services:
+        App\Tests\Support\FakeCliProxy:
+            public: true

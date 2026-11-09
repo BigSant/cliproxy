@@ -1,0 +1,20 @@
+{% if rows is empty %}
+    <p class="muted">Nėra duomenų.</p>
+{% else %}
+    <div class="table-wrap">
+        <table>
+            <thead><tr><th>{{ label_title }}</th><th class="num">Užkl.</th><th class="num">Tokenai</th><th class="num">Cache skait.</th><th class="num">Cache raš.</th></tr></thead>
+            <tbody>
+                {% for row in rows %}
+                    <tr>
+                        <td><span class="provider provider-{{ row.provider }}">{{ row[label] ?: '–' }}</span></td>
+                        <td class="num">{{ row.requests|tokens }}{% if row.failed %} <span class="bad">/ {{ row.failed }}</span>{% endif %}</td>
+                        <td class="num">{{ row.total|tokens }}</td>
+                        <td class="num">{{ row.cache_read|tokens }}</td>
+                        <td class="num">{{ row.cache_creation|tokens }}</td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+{% endif %}

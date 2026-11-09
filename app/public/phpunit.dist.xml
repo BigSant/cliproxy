@@ -15,6 +15,11 @@
         <ini name="error_reporting" value="-1" />
         <server name="APP_ENV" value="test" force="true" />
         <server name="SHELL_VERBOSITY" value="-1" />
+        <!-- The DDE containers carry the real hub's values; tests talk to the fake CLIProxyAPI only. -->
+        <server name="CLIPROXY_MANAGEMENT_URL" value="http://cliproxy.test" force="true" />
+        <server name="CLIPROXY_MANAGEMENT_KEY" value="test-management-key" force="true" />
+        <server name="CLIPROXY_PUBLIC_URL" value="http://127.0.0.1:8317" force="true" />
+        <server name="ADMIN_PASSWORD" value="test-password" force="true" />
     </php>
 
     <testsuites>

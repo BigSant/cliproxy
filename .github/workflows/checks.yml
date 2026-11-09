@@ -1,0 +1,100 @@
+name: Checks
+# Every branch: phpunit, lint and the release build, which deploy.yml requires green on the commit it deploys. They run
+# on the self-hosted runner, so only in throwaway containers: no secrets, no host mounts but the checkout (release: a
+# git archive of it), tests and lint without network.
+#
+# Every bind mount is the checkout's app/public, verified first by .github/ci/checkout-code (no symlinks, nothing
+# outside the checkout).
+#
+# The scripts in .github/ci/ always come from master (a second, sparse checkout), never from the commit being
+# checked: they run on the runner itself, and a branch must not be able to change what runs there. A change to
+# .github/ci/ therefore takes effect once it is on master.
+#
+# Needs: the self-hosted runner of setup-server (labels below). No secrets, no variables.
+on:
+  push:
+    branches: ['**']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: checks-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
+env:
+  # Official images by digest; never DDE's shared tags, which other stacks on this host use. The app runs in
+  # .github/ci/php-image (PHP_IMAGE plus pdo_mysql and setup's timezone).
+  PHP_IMAGE: php:8.5-cli-bookworm@sha256:104890ada56869090c9cd0ec709fe205834d3e383b46d9995dc16cd6388a9302
+  COMPOSER_IMAGE: composer:2.11.0@sha256:278dfc7bd35169965d03f87194816f43bf4e6b6ea61707c2114e52ad12fe24ce
+jobs:
+  phpunit:
+    runs-on: [self-hosted, linux, setup.build]
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          path: source
+          persist-credentials: false
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: master
+          path: ci
+          sparse-checkout: .github/ci
+          persist-credentials: false
+      - name: Install dependencies (network, no scripts or plugins)
+        run: ci/.github/ci/install source
+      - name: PHPUnit without network
+        run: |
+          image=$(ci/.github/ci/php-image)
+          code=$(ci/.github/ci/checkout-code source)
+          docker run --rm --network none -u "$(id -u):$(id -g)" -e HOME=/tmp -e APP_ENV=test \
+            -v "$code:/app" -w /app "$image" php bin/phpunit
+  lint:
+    runs-on: [self-hosted, linux, setup.build]
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          path: source
+          persist-credentials: false
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: master
+          path: ci
+          sparse-checkout: .github/ci
+          persist-credentials: false
+      - name: Install dependencies (network, no scripts or plugins)
+        run: ci/.github/ci/install source
+      - name: Lint without network
+        run: |
+          image=$(ci/.github/ci/php-image)
+          code=$(ci/.github/ci/checkout-code source)
+          docker run --rm --network none -u "$(id -u):$(id -g)" -e HOME=/tmp -e APP_ENV=test \
+            -v "$code:/app" -w /app "$image" sh -ec '
+              php bin/console lint:container
+              php bin/console lint:yaml config --parse-tags
+              php bin/console lint:twig templates
+              php bin/console doctrine:schema:validate --skip-sync'
+  release:
+    # setup's release build without a database (composer install --no-dev with its scripts, then build.sh). Not one
+    # of the deploy gate's three checks: it fails a branch early, where the deploy would fail later.
+    runs-on: [self-hosted, linux, setup.build]
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          path: source
+          persist-credentials: false
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: master
+          path: ci
+          sparse-checkout: .github/ci
+          persist-credentials: false
+      - name: Release build without a database
+        run: |
+          # Until the script is on master (the trusted copy), there is nothing to run yet.
+          if [ ! -x ci/.github/ci/release-build ]; then
+            echo '::warning::.github/ci/release-build is not on master yet; the release build is checked once it is.'
+            exit 0
+          fi
+          ci/.github/ci/release-build source

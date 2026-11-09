@@ -1,0 +1,70 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}Naudojimas{% endblock %}
+
+{% block body %}
+    <div class="page-head">
+        <h1>Naudojimas</h1>
+        <nav class="segmented">
+            {% for key, item in ranges %}
+                <a href="{{ path('app_usage', {range: key}) }}" class="{{ key == range ? 'active' }}">{{ item[1] }}</a>
+            {% endfor %}
+        </nav>
+    </div>
+
+    <section class="stats">
+        <div class="stat"><div class="stat-label">Užklausos</div><div class="stat-value">{{ totals.requests|tokens }}</div><div class="stat-sub">{{ totals.failed }} nepavyko ({{ totals.failed|share(totals.requests) }})</div></div>
+        <div class="stat"><div class="stat-label">Tokenai</div><div class="stat-value">{{ totals.total|tokens }}</div><div class="stat-sub">įvestis {{ totals.input|tokens }} · išvestis {{ totals.output|tokens }}</div></div>
+        <div class="stat"><div class="stat-label">Cache skaitymai</div><div class="stat-value">{{ totals.cache_read|tokens }}</div><div class="stat-sub">{{ totals.cache_read|share(totals.cache_read + totals.cache_creation + totals.input) }} visos įvesties</div></div>
+        <div class="stat {{ totals.cache_creation > totals.cache_read ? 'stat-warn' }}"><div class="stat-label">Cache rašymai</div><div class="stat-value">{{ totals.cache_creation|tokens }}</div><div class="stat-sub">{{ totals.cache_creation > totals.cache_read ? 'rašoma daugiau nei skaitoma – tikrink affinity' : 'santykis tvarkingas' }}</div></div>
+    </section>
+
+    <section class="card">
+        <h2>Per dieną <span class="muted small">(UTC)</span></h2>
+        {% if days is empty %}
+            <p class="muted">Šiame laikotarpyje užklausų nėra.</p>
+        {% else %}
+            <div class="chart" role="img" aria-label="Tokenai per dieną">
+                {% for day in days %}
+                    <div class="chart-col" title="{{ day.day }}: {{ day.total|tokens }} tokenų, {{ day.requests }} užkl., cache skait. {{ day.cache_read|tokens }}, raš. {{ day.cache_creation|tokens }}">
+                        <div class="chart-bar" style="height: {{ (day.total / dayMax * 100)|number_format(1, '.') }}%">
+                            <span class="chart-cache" style="height: {{ day.total > 0 ? (day.cache_read / day.total * 100)|number_format(1, '.') : 0 }}%"></span>
+                        </div>
+                        <div class="chart-label">{{ day.day|slice(5) }}</div>
+                    </div>
+                {% endfor %}
+            </div>
+            <p class="legend"><span class="swatch swatch-total"></span> visi tokenai <span class="swatch swatch-cache"></span> iš jų cache skaitymai</p>
+        {% endif %}
+    </section>
+
+    <div class="grid-2">
+        <section class="card">
+            <h2>Pagal paskyrą</h2>
+            {% include 'usage/_table.html.twig' with {rows: accounts, label: 'account', label_title: 'Paskyra'} %}
+        </section>
+        <section class="card">
+            <h2>Pagal modelį</h2>
+            {% include 'usage/_table.html.twig' with {rows: models, label: 'model', label_title: 'Modelis'} %}
+        </section>
+    </div>
+
+    <section class="card">
+        <h2>Session affinity</h2>
+        <p>
+            {{ affinity.sessions }} sesijų, iš jų <strong class="{{ affinity.moved > 0 ? 'bad' }}">{{ affinity.moved }}</strong> aptarnavo daugiau nei viena paskyra.
+            Prompt cache priklauso paskyrai: sesija, peršokusi į kitą paskyrą, cache rašo iš naujo.
+            Pavienis perėjimas, kai paskyros limitas baigiasi, yra normalus; daug perėjimų reiškia, kad affinity neveikia (Nustatymai → Session affinity).
+        </p>
+        {% if affinity.examples is not empty %}
+            <table>
+                <thead><tr><th>Sesija</th><th class="num">Paskyros</th><th class="num">Užklausos</th></tr></thead>
+                <tbody>
+                    {% for example in affinity.examples %}
+                        <tr><td><code>{{ example.session_id }}</code></td><td class="num">{{ example.accounts }}</td><td class="num">{{ example.requests }}</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        {% endif %}
+    </section>
+{% endblock %}

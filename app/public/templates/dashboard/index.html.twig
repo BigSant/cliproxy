@@ -1,0 +1,100 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}Apžvalga{% endblock %}
+
+{% block body %}
+    <section class="stats">
+        <div class="stat">
+            <div class="stat-label">Užklausos per 24 val.</div>
+            <div class="stat-value">{{ totals.requests|tokens }}</div>
+            <div class="stat-sub">{{ totals.failed }} nepavyko</div>
+        </div>
+        <div class="stat">
+            <div class="stat-label">Tokenai per 24 val.</div>
+            <div class="stat-value">{{ totals.total|tokens }}</div>
+            <div class="stat-sub">įvestis {{ totals.input|tokens }} · išvestis {{ totals.output|tokens }}</div>
+        </div>
+        <div class="stat">
+            <div class="stat-label">Cache skaitymai / rašymai</div>
+            <div class="stat-value">{{ totals.cache_read|tokens }} <span class="muted">/ {{ totals.cache_creation|tokens }}</span></div>
+            <div class="stat-sub">skaitymų dalis {{ totals.cache_read|share(totals.cache_read + totals.cache_creation + totals.input) }}</div>
+        </div>
+        <div class="stat {{ affinity.moved > 0 ? 'stat-warn' }}">
+            <div class="stat-label">Session affinity</div>
+            <div class="stat-value">{{ affinity.sessions - affinity.moved }}<span class="muted">/{{ affinity.sessions }}</span></div>
+            <div class="stat-sub">{{ affinity.moved > 0 ? affinity.moved ~ ' sesijos perėjo į kitą paskyrą' : 'sesijos laikosi savo paskyros' }}</div>
+        </div>
+    </section>
+
+    <section class="card">
+        <div class="card-head">
+            <div>
+                <h1>Paskyros ir limitai</h1>
+                <p class="muted">
+                    Limitai perskaityti {{ quotaRefreshedAt|ago|trim('.', 'right') }}.
+                    {% if autoPriority %}Soonest-reset-first <strong>įjungtas</strong>: pirmiau naudojama paskyra, kurios savaitinis limitas atsinaujina anksčiausiai.{% else %}Soonest-reset-first išjungtas (<a href="{{ path('app_settings') }}">Nustatymai</a>).{% endif %}
+                </p>
+            </div>
+            <form method="post" action="{{ path('app_accounts_quotas') }}">
+                <input type="hidden" name="_token" value="{{ csrf_token('accounts') }}">
+                <input type="hidden" name="back" value="dashboard">
+                <button class="button">Perskaityti dabar</button>
+            </form>
+        </div>
+        {% if rows is empty %}
+            <div class="empty">
+                <p>Hub'e dar nėra paskyrų.</p>
+                <a class="button primary" href="{{ path('app_accounts') }}">Prijungti Claude ar Codex paskyrą</a>
+            </div>
+        {% else %}
+            <div class="table-wrap">
+                <table class="accounts">
+                    <thead>
+                        <tr><th>Paskyra</th><th>5 val.</th><th>7 d.</th><th>7 d. Fable</th><th class="num">Užklausos</th></tr>
+                    </thead>
+                    <tbody>
+                        {% for row in rows %}
+                            <tr class="{{ row.account.disabled ? 'is-off' }}">
+                                <td>{% include '_parts/account_cell.html.twig' %}</td>
+                                <td>{% include '_parts/quota.html.twig' with {window: row.windows['5h'] ?? null} %}</td>
+                                <td>{% include '_parts/quota.html.twig' with {window: row.windows['7d'] ?? null} %}</td>
+                                <td>{% include '_parts/quota.html.twig' with {window: row.windows['7d-fable'] ?? null} %}</td>
+                                <td class="num">{{ row.account.success }}{% if row.account.failed %} <span class="bad">/ {{ row.account.failed }}</span>{% endif %}</td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        {% endif %}
+    </section>
+
+    <section class="card">
+        <div class="card-head">
+            <h2>Gyvai</h2>
+            <span class="live-dot" title="Atnaujinama kas 5 s"></span>
+        </div>
+        <div class="table-wrap">
+            <table class="live" data-live-url="{{ path('app_live') }}">
+                <thead>
+                    <tr><th>Laikas</th><th>Paskyra</th><th>Modelis</th><th class="num">Įvestis</th><th class="num">Išvestis</th><th class="num">Cache skait.</th><th class="num">Cache raš.</th><th class="num">Trukmė</th></tr>
+                </thead>
+                <tbody>
+                    {% for record in recent %}
+                        <tr class="{{ record.failed ? 'is-failed' }}">
+                            <td>{{ record.occurredAt|date('H:i:s') }}</td>
+                            <td>{{ record.account }}</td>
+                            <td><span class="provider provider-{{ record.provider }}">{{ record.model }}</span></td>
+                            <td class="num">{{ record.inputTokens|tokens }}</td>
+                            <td class="num">{{ record.outputTokens|tokens }}</td>
+                            <td class="num">{{ record.cacheReadTokens|tokens }}</td>
+                            <td class="num">{{ record.cacheCreationTokens|tokens }}</td>
+                            <td class="num">{{ (record.latencyMs / 1000)|number_format(1, ',') }} s</td>
+                        </tr>
+                    {% else %}
+                        <tr class="placeholder"><td colspan="8" class="muted">Dar nėra užklausų per hub'ą.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </section>
+{% endblock %}

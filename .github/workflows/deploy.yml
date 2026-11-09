@@ -1,93 +1,111 @@
-# Example GitHub Actions workflow for a project's environment repository: copy it to
-# .github/workflows/deploy.yml (create-project --ci github writes it). setup does the work: make
-# pipeline-deploy in the build root (setup/doc/lt/09-aplinkos.md, "GitHub Actions"); keep only the
-# inputs and the job here.
-#
-# Deploys are started by hand: Actions -> Deploy -> Run workflow, with the environment and the inputs
-# (the file must be on the default branch for the button to appear). The job runs on the self-hosted
-# runner of the build server (the labels below); environment: makes GitHub record the deployment and
-# gives the job that environment's secrets and variables. The build root holds this repository in app/
-# and setup beside it: the repository variable BUILD_ROOT, else setup-server's layout
-# $SETUP_SERVER_ROOT/projects/<repository name in lower case> (the runner sets SETUP_SERVER_ROOT).
-# Secrets are environment secrets of staging / production (DEPLOY_PLAIN_VARIABLES: environment
-# variables); make deploy-variables ENV=prod lists and checks them. GitHub does not export them: the
-# step passes the JSON of every secret and variable the job can read, and make pipeline-deploy expands
-# the names its own environment lacks (never printing a value; the runner masks each secret also in
-# its JSON-escaped form).
 name: Deploy
-run-name: Deploy to ${{ inputs.environment }} ${{ inputs.rollback == 'yes' && '(rollback)' || inputs.ref }}
-
+# The hub's production on this computer (setup-server build root projects/cliproxy, target prod =
+# local:/home/tomas/Projects/runtime/cliproxy/prod). Started by hand: Actions -> Deploy -> Run workflow on master. It
+# deploys master's commit once phpunit, lint and release are green on it, checks the health pages, and rolls back to
+# the previous release when the new one is unhealthy. README, "Diegimas".
+#
+# GitHub Free: no environments or environment secrets. The secrets are repository Actions secrets with the PROD_
+# prefix, mapped by name in the deploy steps:
+#   PROD_APP_SECRET, PROD_ADMIN_PASSWORD, PROD_CLIPROXY_MANAGEMENT_KEY, PROD_CLIPROXY_API_KEY,
+#   PROD_DATABASE_PASSWORD, PROD_DATABASE_ROOT_PASSWORD
+#   gh secret set PROD_APP_SECRET --repo BigSant/cliproxy   (value on stdin; never echoed)
+# PROD_CLIPROXY_API_KEY only seeds config.yaml on the very first start; later keys live in the hub (Nustatymai).
+#
+# Every make here is setup's own project.mk, run with -f from the setup checkout beside the build root
+# ($RUNNER_TEMP/setup-make), never the build root's app/Makefile.
+run-name: Deploy ${{ github.sha }}
 on:
   workflow_dispatch:
-    inputs:
-      environment:
-        # An extra environment (STAGE_ENVIRONMENTS="mdv" in env/common.env, env/mdv.env.example) is a GitHub
-        # environment of its own name: add it to the options, e.g. [staging, production, mdv].
-        description: GitHub environment (staging = ENV=stage, production = ENV=prod, another = that ENV)
-        type: choice
-        options: [staging, production]
-        default: staging
-      ref:
-        # One repository: empty = the commit this workflow runs on. Separate code repository in app/public
-        # (PrestaShop): the code tag or commit, required unless rollback is yes.
-        description: Tag or commit to deploy (ignored with rollback)
-        type: string
-        default: ""
-      images:
-        description: Rebuild and restart the images first (auto = when needed; prod needs setup on a release tag)
-        type: choice
-        options: ["auto", "no", "yes"]
-        default: "auto"
-      cron:
-        description: Reload the crontab in the running cron container after the deploy (auto = when config/cron changed)
-        type: choice
-        options: ["auto", "no", "yes"]
-        default: "auto"
-      cache:
-        description: Clear the application cache after the deploy (auto = when the deploy changes what it holds)
-        type: choice
-        options: ["auto", "no", "yes"]
-        default: "auto"
-      rollback:
-        description: Deploy the previous release again
-        type: choice
-        options: ["no", "yes"]
-        default: "no"
-      backup:
-        description: Back up the target database before the hooks, upgrades and migrations (yes when the deploy changes data)
-        type: choice
-        options: ["no", "yes"]
-        default: "no"
-
-# The step needs no GitHub API access: the build root fetches with the build server's own key.
 permissions:
   contents: read
-
+  checks: read
 jobs:
   deploy:
-    name: Deploy to ${{ inputs.environment }}
+    if: github.ref == 'refs/heads/master'
     runs-on: [self-hosted, linux, setup.build]
-    environment: ${{ inputs.environment }}
-    # One deploy per environment at a time; a newer one waits instead of cancelling the running one.
     concurrency:
-      group: deploy-${{ inputs.environment }}
+      group: deploy-prod
       cancel-in-progress: false
+    timeout-minutes: 60
+    env:
+      BUILD_ROOT: ${{ vars.BUILD_ROOT }}
+      DEPLOY_ATTEMPT: manual-${{ github.run_id }}-${{ github.run_attempt }}
     steps:
-      - name: make pipeline-deploy
+      - name: Preflight
+        shell: bash
         env:
-          # GitHub has no variable with the job's environment name: the step passes it.
-          DEPLOY_ENVIRONMENT: ${{ inputs.environment }}
-          REF: ${{ inputs.ref }}
-          IMAGES: ${{ inputs.images }}
-          CRON: ${{ inputs.cron }}
-          CACHE: ${{ inputs.cache }}
-          ROLLBACK: ${{ inputs.rollback }}
-          BACKUP: ${{ inputs.backup }}
-          BUILD_ROOT: ${{ vars.BUILD_ROOT }}
-          DEPLOY_SECRETS_JSON: ${{ toJSON(secrets) }}
-          DEPLOY_VARIABLES_JSON: ${{ toJSON(vars) }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # The commit must have passed the checks (checks.yml) before it reaches the hub.
+          for check in phpunit lint release; do
+            conclusion=$(gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/check-runs?check_name=$check" \
+              --jq '[.check_runs[] | select(.conclusion != null)] | sort_by(.completed_at) | last | .conclusion // ""')
+            [ "$conclusion" = success ] || { echo "::error::Check $check is not green on $GITHUB_SHA (${conclusion:-not run})"; exit 1; }
+          done
+          root=${BUILD_ROOT:-${SETUP_SERVER_ROOT:-/srv/setup-server}/projects/cliproxy}
+          [ -f "$root/app/Makefile" ] || { echo "::error::No build root: $root/app/Makefile is missing (setup-server add-project)"; exit 1; }
+          root=$(cd -P "$root" && pwd -P)
+          setup=
+          for candidate in "$(dirname "$root")/setup" "$(dirname "$(dirname "$root")")/setup"; do
+            if [ -f "$candidate/docker/project.mk" ]; then setup=$(cd -P "$candidate" && pwd -P); break; fi
+          done
+          [ -n "$setup" ] || { echo "::error::No setup beside the build root $root"; exit 1; }
+          printf '#!/bin/bash\nexec make -f %q -C %q SETUP_DIRECTORY=%q PROJECT_DOCKER_DIRECTORY=%q "$@"\n' \
+            "$setup/docker/project.mk" "$root/app" "$setup" "$root/app" > "$RUNNER_TEMP/setup-make"
+          chmod +x "$RUNNER_TEMP/setup-make"
+      - name: Deploy
+        id: deploy
+        shell: bash
+        env:
+          DEPLOY_ENVIRONMENT: production
+          REF: ${{ github.sha }}
+          BACKUP: "yes"
+          IMAGES: auto
+          CRON: auto
+          CACHE: auto
+          HUB_SECRET_APP_SECRET: ${{ secrets.PROD_APP_SECRET }}
+          HUB_SECRET_ADMIN_PASSWORD: ${{ secrets.PROD_ADMIN_PASSWORD }}
+          HUB_SECRET_CLIPROXY_MANAGEMENT_KEY: ${{ secrets.PROD_CLIPROXY_MANAGEMENT_KEY }}
+          HUB_SECRET_CLIPROXY_API_KEY: ${{ secrets.PROD_CLIPROXY_API_KEY }}
+          HUB_SECRET_DATABASE_PASSWORD: ${{ secrets.PROD_DATABASE_PASSWORD }}
+          HUB_SECRET_DATABASE_ROOT_PASSWORD: ${{ secrets.PROD_DATABASE_ROOT_PASSWORD }}
+        run: &deploy |
+          set -euo pipefail
+          # setup expands the names of DEPLOY_SECRETS_JSON its environment lacks; empty ones stay unset.
+          DEPLOY_SECRETS_JSON=$(python3 -c 'import json, os; p = "HUB_SECRET_"
+          print(json.dumps({k[len(p):]: v for k, v in os.environ.items() if k.startswith(p) and v}))')
+          export DEPLOY_SECRETS_JSON
+          unset "${!HUB_SECRET_@}"
+          "$RUNNER_TEMP/setup-make" pipeline-deploy
+      - name: Health check
         shell: bash
         run: |
-          repository=${GITHUB_REPOSITORY#*/}
-          BUILD_ROOT=${BUILD_ROOT:-${SETUP_SERVER_ROOT:-/srv/setup-server}/projects/${repository,,}}
-          make -C "$BUILD_ROOT/app" pipeline-deploy
+          "$RUNNER_TEMP/setup-make" deploy-health ENV=prod attempt="$DEPLOY_ATTEMPT"
+      - name: Code on the target
+        id: state
+        if: failure() && steps.deploy.outcome != 'skipped'
+        shell: bash
+        run: |
+          # true when this attempt's code reached the target (setup's events), so a rollback is needed.
+          echo "code=$("$RUNNER_TEMP/setup-make" -s deploy-status ENV=prod attempt="$DEPLOY_ATTEMPT" field=code_reached)" >> "$GITHUB_OUTPUT"
+      - name: Roll back
+        id: rollback
+        if: failure() && steps.state.outputs.code == 'true'
+        shell: bash
+        env:
+          DEPLOY_ENVIRONMENT: production
+          ROLLBACK: "yes"
+          CACHE: auto
+          HUB_SECRET_APP_SECRET: ${{ secrets.PROD_APP_SECRET }}
+          HUB_SECRET_ADMIN_PASSWORD: ${{ secrets.PROD_ADMIN_PASSWORD }}
+          HUB_SECRET_CLIPROXY_MANAGEMENT_KEY: ${{ secrets.PROD_CLIPROXY_MANAGEMENT_KEY }}
+          HUB_SECRET_CLIPROXY_API_KEY: ${{ secrets.PROD_CLIPROXY_API_KEY }}
+          HUB_SECRET_DATABASE_PASSWORD: ${{ secrets.PROD_DATABASE_PASSWORD }}
+          HUB_SECRET_DATABASE_ROOT_PASSWORD: ${{ secrets.PROD_DATABASE_ROOT_PASSWORD }}
+        run: *deploy
+      - name: Health check after rollback
+        if: failure() && steps.rollback.outcome == 'success'
+        shell: bash
+        run: |
+          "$RUNNER_TEMP/setup-make" deploy-health ENV=prod attempt="$DEPLOY_ATTEMPT" rollback=1

@@ -1,0 +1,47 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}Prijungimas{% endblock %}
+
+{% block body %}
+    <h1>Prijungimas</h1>
+    <p class="muted">Kiti įrankiai šiame kompiuteryje jungiasi prie hub'o adresu <code>{{ url }}</code> (tik 127.0.0.1).
+        Iš kito kompiuterio – per SSH tunelį: <code>ssh -N -L {{ url|split(':')|last }}:127.0.0.1:{{ url|split(':')|last }} {{ app.request.host }}</code>.
+        Claude prenumeratą naudok tik per Claude Code.</p>
+    {% set key_text = key ?: '<rakto nėra>' %}
+
+    <section class="card">
+        <div class="card-head"><h2>Claude Code</h2><span class="muted small"><code>~/.claude/settings.json</code></span></div>
+        {% set claude %}{
+  "env": {
+    "ANTHROPIC_BASE_URL": "{{ url }}",
+    "ANTHROPIC_AUTH_TOKEN": "{{ key_text }}"
+  }
+}{% endset %}
+        <pre class="code"><code>{{ claude }}</code></pre>
+        <button type="button" class="button" data-copy="{{ claude }}">Kopijuoti</button>
+        <p class="muted small">Nekeisdamas įprastos konfigūracijos: <code>CLAUDE_CONFIG_DIR=~/.claude-hub claude</code> su šiuo failu <code>~/.claude-hub/settings.json</code>.</p>
+    </section>
+
+    <section class="card">
+        <div class="card-head"><h2>Codex</h2><span class="muted small"><code>~/.codex/config.toml</code></span></div>
+        {% set codex %}model_provider = "cliproxy"
+
+[model_providers.cliproxy]
+name = "CLIProxyAPI"
+base_url = "{{ url }}/v1"
+wire_api = "responses"
+requires_openai_auth = false
+supports_websockets = true
+experimental_bearer_token = "{{ key_text }}"{% endset %}
+        <pre class="code"><code>{{ codex }}</code></pre>
+        <button type="button" class="button" data-copy="{{ codex }}">Kopijuoti</button>
+        <p class="muted small">Atskirai: <code>CODEX_HOME=~/.codex-hub codex</code>. T3 Code – „Use existing CLI“.</p>
+    </section>
+
+    <section class="card">
+        <div class="card-head"><h2>Patikrinimas</h2></div>
+        {% set check %}curl -s {{ url }}/v1/models -H "Authorization: Bearer {{ key_text }}" | head -c 300{% endset %}
+        <pre class="code"><code>{{ check }}</code></pre>
+        <button type="button" class="button" data-copy="{{ check }}">Kopijuoti</button>
+    </section>
+{% endblock %}

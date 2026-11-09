@@ -1,0 +1,84 @@
+<?php
+
+namespace App\Twig;
+
+use Psr\Clock\ClockInterface;
+use Twig\Attribute\AsTwigFilter;
+
+/** Number and time formats of the dashboard (Lithuanian). */
+class AppExtension
+{
+    public function __construct(private readonly ClockInterface $clock)
+    {
+    }
+
+    /** 1234567 → 1,2 M */
+    #[AsTwigFilter('tokens')]
+    public function tokens(int|float|null $value): string
+    {
+        $value = (float) $value;
+        foreach ([1e9 => ' mlrd.', 1e6 => ' M', 1e3 => ' k'] as $size => $suffix) {
+            if (abs($value) >= $size) {
+                return number_format($value / $size, $value / $size >= 100 ? 0 : 1, ',', ' ').$suffix;
+            }
+        }
+
+        return number_format($value, 0, ',', ' ');
+    }
+
+    /** A share in percent, or a dash when there is nothing to divide. */
+    #[AsTwigFilter('share')]
+    public function share(int|float $part, int|float $whole): string
+    {
+        return $whole > 0 ? number_format($part / $whole * 100, 1, ',', ' ').' %' : '–';
+    }
+
+    /** ok below 70 %, warn below 90 %, high from there: the colour of a limit bar. */
+    #[AsTwigFilter('level')]
+    public function level(?float $used): string
+    {
+        return match (true) {
+            null === $used => 'none',
+            $used >= 90 => 'high',
+            $used >= 70 => 'warn',
+            default => 'ok',
+        };
+    }
+
+    /** How long until an instant: "po 2 d. 4 val.", "po 35 min." */
+    #[AsTwigFilter('until')]
+    public function until(?\DateTimeInterface $instant): string
+    {
+        if (null === $instant) {
+            return '–';
+        }
+        $seconds = $instant->getTimestamp() - $this->clock->now()->getTimestamp();
+
+        return $seconds <= 0 ? 'dabar' : 'po '.self::span($seconds);
+    }
+
+    /** How long ago: "prieš 3 min." */
+    #[AsTwigFilter('ago')]
+    public function ago(?\DateTimeInterface $instant): string
+    {
+        if (null === $instant) {
+            return 'niekada';
+        }
+        $seconds = $this->clock->now()->getTimestamp() - $instant->getTimestamp();
+
+        return $seconds < 60 ? 'ką tik' : 'prieš '.self::span($seconds);
+    }
+
+    private static function span(int $seconds): string
+    {
+        $days = intdiv($seconds, 86400);
+        $hours = intdiv($seconds % 86400, 3600);
+        $minutes = intdiv($seconds % 3600, 60);
+
+        return match (true) {
+            $days > 0 => $days.' d.'.($hours > 0 ? ' '.$hours.' val.' : ''),
+            $hours > 0 => $hours.' val.'.($minutes > 0 ? ' '.$minutes.' min.' : ''),
+            default => max(1, $minutes).' min.',
+        };
+    }
+}

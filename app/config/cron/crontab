@@ -1,0 +1,4 @@
+# The dashboard's collector (README, "Kolektorius"): usage records from CLIProxyAPI's queue into the database, account
+# limits every few minutes, and the soonest-reset-first priorities when they are on. One run lasts just under a minute.
+* * * * * cd /var/www/html && php bin/console app:collect --duration=55
+

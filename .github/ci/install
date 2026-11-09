@@ -1,0 +1,24 @@
+#!/bin/sh
+# Usage: .github/ci/install <checkout>
+# Vendor and importmap assets for the checks, each step in its own throwaway container.
+# - Composer downloads with network but runs no scripts or plugins, so a dependency change cannot run code there.
+# - The plugins' offline part (symfony/runtime writes vendor/autoload_runtime.php, which bin/console needs) runs
+#   again without network.
+# - importmap:install boots the app with network to fetch the JavaScript packages; nothing secret is in reach.
+# PHP_IMAGE and COMPOSER_IMAGE (pinned by digest) come from checks.yml.
+set -eu
+: "${PHP_IMAGE:?}" "${COMPOSER_IMAGE:?}"
+checkout=${1:?usage: install <checkout>}
+
+# docker_run [docker run options] <image> <command>: a throwaway container that sees only the checkout's app/public,
+# verified right before each mount (checkout-code).
+docker_run() {
+    code=$("$(dirname "$0")/checkout-code" "$checkout")
+    docker run --rm -u "$(id -u):$(id -g)" -e HOME=/tmp -e COMPOSER_HOME=/tmp/composer -e APP_ENV=test \
+        -v "$code:/app" -w /app "$@"
+}
+
+docker_run "$COMPOSER_IMAGE" composer install --no-interaction --no-progress --no-scripts --no-plugins
+docker_run --network none "$COMPOSER_IMAGE" composer dump-autoload --no-interaction --no-scripts
+# The test kernel answers HTTP with the fake CLIProxyAPI, so the dev kernel fetches.
+docker_run -e APP_ENV=dev "$PHP_IMAGE" php bin/console importmap:install
