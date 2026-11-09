@@ -31,10 +31,15 @@ class Watchdog
         $this->directory = \dirname($archiveDirectory);
     }
 
-    /** The collector's side: proof of life and the topic to push to, as files. */
+    /** The collector's side: proof of life and the topic to push to (null: unknown now, keep the last), as files. */
     public function beat(?string $ntfyUrl): void
     {
-        foreach (['.heartbeat' => (string) $this->clock->now()->getTimestamp(), '.ntfy' => (string) $ntfyUrl] as $file => $content) {
+        $files = ['.heartbeat' => (string) $this->clock->now()->getTimestamp()];
+        // Unknown (the database is away): the topic the watchdog has stays – it is exactly then that it must push.
+        if (null !== $ntfyUrl) {
+            $files['.ntfy'] = $ntfyUrl;
+        }
+        foreach ($files as $file => $content) {
             if (false !== @file_put_contents($this->directory.'/'.$file, $content)) {
                 @chmod($this->directory.'/'.$file, 0o600);
             }

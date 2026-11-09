@@ -35,9 +35,10 @@ class HealthController
         } catch (\Throwable) {
             $checks['database'] = 'down';
         }
-        // A deploy that recreates CLIProxyAPI checks this while it starts: give it up to 20 seconds.
+        // A deploy that recreates CLIProxyAPI checks this while it starts: give it up to ~8 seconds (setup's health
+        // request waits 10).
         $version = $client->version();
-        for ($try = 0; null === $version && $try < 10; ++$try) {
+        for ($try = 0; null === $version && $try < 4; ++$try) {
             usleep($this->retryMicroseconds);
             $version = $client->version();
         }

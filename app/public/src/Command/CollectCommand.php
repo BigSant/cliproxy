@@ -179,6 +179,9 @@ class CollectCommand
         if ([] !== $this->spool->pendingDays()) {
             $conditions['usage:pending'] = ['level' => Alert::WARNING, 'message' => 'Usage spool laukia pakartotinio įrašymo: '.implode(', ', $this->spool->pendingDays()).'.'];
         }
+        if (isset($this->errors['traffic'])) {
+            $conditions['collector:traffic'] = ['level' => Alert::WARNING, 'message' => 'Srauto žurnalas nesirenka: '.$this->errors['traffic'].' (failai laukia logs/).'];
+        }
         $quarantined = $this->traffic->quarantined();
         if ([] !== $quarantined) {
             $conditions['traffic:quarantine'] = ['level' => Alert::WARNING, 'message' => \sprintf('%d request log\'ų nepavyko perskaityti – jie cliproxy-traffic/quarantine/ su klaida šalia.', \count($quarantined))];

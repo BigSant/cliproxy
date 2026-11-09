@@ -44,10 +44,13 @@ class UsageRecord
     public string $nodeKind = '';
     #[ORM\Column(options: ['default' => false])]
     public bool $isCompaction = false;
-    /** Another attempt of a request whose previous attempt failed (a retry or a switch to another account): requests
-     * are the records minus these, and failed requests the failed records minus these. */
+    /** Another attempt of a request whose previous attempt failed (a retry or a switch to another account). */
     #[ORM\Column(options: ['default' => false])]
     public bool $isRetry = false;
+    /** A failed attempt another attempt of the same request followed: not a request of its own, not a failed request.
+     * Counting by these (not by the retries) keeps every group – account, model, day – from going negative. */
+    #[ORM\Column(options: ['default' => false])]
+    public bool $superseded = false;
     /** @var array<string, mixed> */
     #[ORM\Column(type: Types::JSON, nullable: true)]
     public ?array $raw = null;

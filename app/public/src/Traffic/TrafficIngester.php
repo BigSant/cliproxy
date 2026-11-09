@@ -4,6 +4,7 @@ namespace App\Traffic;
 
 use App\Entity\Exchange;
 use App\Entity\ToolCall;
+use App\Entity\UsageRecord;
 use App\Repository\ExchangeRepository;
 use App\Repository\ToolCallRepository;
 use App\Repository\UsageRecordRepository;
@@ -26,6 +27,8 @@ class TrafficIngester
     private const int SETTLE_SECONDS = 5;
     /** Larger files are archived as a stream and not parsed (a long Codex WebSocket connection can grow without end). */
     private const int MAX_PARSE_BYTES = 256 * 1_048_576;
+    /** usage_record_id of an exchange that will not get one (a prewarm, a token count, a record that never came). */
+    private const string NOT_LINKED = '0';
     /** Attempts on one file before the quarantine: the process died on it this many times. */
     private const int MAX_ATTEMPTS = 2;
 
@@ -131,6 +134,10 @@ class TrafficIngester
     public function reparse(string $archivePath): array
     {
         $path = $this->archiveDirectory.'/'.$archivePath;
+        // A compressed file this large expands past what the collector parses at all (MAX_PARSE_BYTES).
+        if (is_file($path) && filesize($path) > self::MAX_PARSE_BYTES / 4) {
+            throw new \RuntimeException('Too large to read again: '.$archivePath);
+        }
         $text = is_file($path) ? @gzdecode((string) file_get_contents($path)) : false;
         if (false === $text) {
             throw new \RuntimeException('Cannot read the archive copy '.$archivePath);
@@ -143,16 +150,16 @@ class TrafficIngester
     }
 
     /**
-     * Pieces of request logs CLIProxyAPI never finished (it was stopped mid-stream; a long WebSocket connection's
-     * timeline lives in logs/request-log-parts-* until the connection closes). Idle for an hour, they move to
-     * archive/orphans/<day>/ as they are: kept, not parsed.
+     * Pieces of request logs CLIProxyAPI never finished (it was stopped mid-stream). A long WebSocket connection's
+     * timeline lives in logs/request-log-parts-* until the connection closes, possibly after a quiet hour, so nothing
+     * is moved: a directory idle for a day is copied to archive/orphans/<day>/ (once), CLIProxyAPI's own stays.
      *
-     * @return int directories moved
+     * @return int directories copied
      */
     public function collectOrphans(): int
     {
-        $moved = 0;
-        $idle = $this->clock->now()->getTimestamp() - 3600;
+        $moved = 0; // copied
+        $idle = $this->clock->now()->getTimestamp() - 86400;
         foreach (glob($this->logDirectory.'/request-log-parts-*', \GLOB_ONLYDIR) ?: [] as $directory) {
             $newest = filemtime($directory) ?: 0;
             foreach (new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($directory, \FilesystemIterator::SKIP_DOTS)) as $file) {
@@ -165,8 +172,16 @@ class TrafficIngester
             if (!is_dir($target) && !@mkdir($target, 0o750, true) && !is_dir($target)) {
                 throw new ArchiveException('Cannot create '.$target);
             }
-            if (!rename($directory, $target.'/'.basename($directory))) {
-                throw new ArchiveException('Cannot move '.basename($directory).' to '.$target);
+            $copy = $target.'/'.basename($directory);
+            if (is_dir($copy)) {
+                continue;
+            }
+            mkdir($copy, 0o750);
+            foreach (new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($directory, \FilesystemIterator::SKIP_DOTS), \RecursiveIteratorIterator::SELF_FIRST) as $item) {
+                $destination = $copy.'/'.substr($item->getPathname(), \strlen($directory) + 1);
+                if ($item->isDir() ? !@mkdir($destination, 0o750) && !is_dir($destination) : !copy($item->getPathname(), $destination)) {
+                    throw new ArchiveException('Cannot copy '.$item->getPathname().' to '.$copy);
+                }
             }
             ++$moved;
         }
@@ -197,8 +212,10 @@ class TrafficIngester
             if (null !== $name && basename($file) !== $name) {
                 continue;
             }
+            // Its original write time (the request's duration until the usage record links it), and settled.
+            $mtime = preg_match('/^mtime: (\d+)$/m', (string) @file_get_contents($file.'.error'), $match) ? (int) $match[1] : (int) filemtime($file);
             if (rename($file, $this->logDirectory.'/'.basename($file))) {
-                touch($this->logDirectory.'/'.basename($file), $this->clock->now()->getTimestamp() - self::SETTLE_SECONDS - 1);
+                touch($this->logDirectory.'/'.basename($file), min($mtime, $this->clock->now()->getTimestamp() - self::SETTLE_SECONDS - 1));
                 @rename($file.'.error', $file.'.error.'.$this->clock->now()->format('YmdHis'));
                 ++$moved;
             }
@@ -217,6 +234,7 @@ class TrafficIngester
             foreach (WebsocketTimeline::turns($timeline) as $index => $turn) {
                 $exchange = $this->exchangeFor(mb_substr($name, 0, 180).'#'.($index + 1));
                 $this->fillWebsocketTurn($exchange, $name, $log, $turn);
+                $this->reenrich($exchange);
                 $exchange->archivePath = $archived;
                 // Saved turn by turn: a later turn's tool results find the calls of the earlier ones.
                 $entityManager->persist($exchange);
@@ -227,6 +245,7 @@ class TrafficIngester
         if ([] === $exchanges) {
             $exchange = $this->exchangeFor(mb_substr($name, 0, 190));
             $this->fill($exchange, $name, $log, $writtenAt);
+            $this->reenrich($exchange);
             if (null !== $timeline) {
                 $exchange->endpoint = mb_substr($log->path().' (ws)', 0, 64);
                 $exchange->error = $exchange->error ?: 'Ryšys be nė vienos užklausos';
@@ -237,7 +256,28 @@ class TrafficIngester
             $exchanges[] = $exchange;
         }
 
+        // An older parser made one exchange of a WebSocket connection: it stays, marked superseded by the turns.
+        if (\count($exchanges) > 1 || str_contains($exchanges[0]->logFile, '#')) {
+            $whole = $this->exchanges->findOneBy(['logFile' => mb_substr($name, 0, 190)]);
+            if (null !== $whole) {
+                $whole->kind = Exchange::KIND_SUPERSEDED;
+                $entityManager->flush();
+            }
+        }
+
         return $exchanges;
+    }
+
+    /** A reparsed exchange that was linked gets its usage record's additions back (the log alone lacks them). */
+    private function reenrich(Exchange $exchange): void
+    {
+        if (null === $exchange->usageRecordId || self::NOT_LINKED === $exchange->usageRecordId) {
+            return;
+        }
+        $usage = $this->usage->find($exchange->usageRecordId);
+        if (null !== $usage) {
+            $this->enrich($exchange, $usage);
+        }
     }
 
     private function tooLarge(string $name, string $path, int $size, int $writtenAt, string $archived): Exchange
@@ -278,7 +318,10 @@ class TrafficIngester
             if ($cause instanceof \Doctrine\DBAL\Exception\UniqueConstraintViolationException) {
                 return false;
             }
-            if ($cause instanceof \Doctrine\DBAL\Exception || $cause instanceof ArchiveException) {
+            // The connection gone, a deadlock or lock wait, a disk problem: worth the next pass. Any other database
+            // error (a value too long, …) is the file's: quarantine, or it would block the log for good.
+            if ($cause instanceof \Doctrine\DBAL\Exception\ConnectionException || $cause instanceof \Doctrine\DBAL\Exception\RetryableException
+                || $cause instanceof ArchiveException) {
                 return true;
             }
         }
@@ -380,7 +423,7 @@ class TrafficIngester
         $exchange->sessionId = mb_substr($turn->sessionId, 0, 64);
         $exchange->stream = $turn->stream;
         // A kind the usage record told (subagent, compaction, fork) outlives a reparse.
-        if (null === $exchange->usageRecordId || Turn::KIND_MAIN === $exchange->kind || Turn::KIND_SIDE === $turn->kind) {
+        if (null === $exchange->usageRecordId || self::NOT_LINKED === $exchange->usageRecordId || Turn::KIND_MAIN === $exchange->kind || Turn::KIND_SIDE === $turn->kind) {
             $exchange->kind = $turn->kind;
         }
         $exchange->error = mb_substr($turn->error, 0, 8192);
@@ -424,7 +467,7 @@ class TrafficIngester
         if (!@rename($path, $target)) {
             throw new ArchiveException('Cannot move '.basename($path).' to the quarantine', 0, $exception);
         }
-        file_put_contents($target.'.error', \sprintf("%s\n%s: %s\n", $this->clock->now()->format(\DATE_ATOM), $exception::class, $exception->getMessage()));
+        file_put_contents($target.'.error', \sprintf("%s\nmtime: %d\n%s: %s\n", $this->clock->now()->format(\DATE_ATOM), (int) filemtime($target), $exception::class, $exception->getMessage()));
     }
 
     /** @return list<string> files waiting in quarantine (Įspėjimai shows them) */
@@ -455,44 +498,58 @@ class TrafficIngester
     public function linkAccounts(): void
     {
         $entityManager = $this->doctrine->getManager();
+        $giveUp = $this->clock->now()->modify('-3 hours');
         foreach ($this->exchanges->withoutAccount($this->clock->now()->modify('-1 day')) as $exchange) {
             $websocket = str_ends_with($exchange->endpoint, '(ws)');
-            $usage = $websocket
-                ? $this->usage->forWebsocketTurn($exchange->requestTail, $exchange->sessionId, $exchange->occurredAt)
-                : $this->usage->forRequest($exchange->requestTail, $exchange->occurredAt);
+            // A prewarm or a token count has no usage record of its own: never linked, never in the queue again.
+            $usage = Turn::KIND_SIDE === $exchange->kind && ($websocket || str_contains($exchange->endpoint, 'count_tokens')) ? null
+                : ($websocket
+                    ? $this->usage->forWebsocketTurn($exchange->requestTail, $exchange->sessionId, $exchange->occurredAt)
+                    : $this->usage->forRequest($exchange->requestTail, $exchange->occurredAt));
             if (null === $usage) {
+                // Three hours without a record: it is not coming (usage off then, a record lost upstream).
+                if (Turn::KIND_SIDE === $exchange->kind || $exchange->occurredAt < $giveUp) {
+                    $exchange->usageRecordId = self::NOT_LINKED;
+                    $entityManager->flush();
+                }
                 continue;
             }
             $exchange->usageRecordId = $usage->getId();
-            $exchange->authIndex = $usage->authIndex;
-            $exchange->account = $usage->account;
-            if ('' === $exchange->sessionId) {
-                $exchange->sessionId = $usage->sessionId;
-            }
-            if (Turn::KIND_SIDE !== $exchange->kind) {
-                $exchange->kind = match (true) {
-                    $usage->isCompaction || 'compaction' === $usage->nodeKind => Turn::KIND_COMPACTION,
-                    'fork' === $usage->nodeKind => Turn::KIND_FORK,
-                    '' !== $usage->parentSessionId => Turn::KIND_SUBAGENT,
-                    default => $exchange->kind,
-                };
-            }
-            // CLIProxyAPI's own measure beats the log file's write time (a WebSocket turn's timeline is exact already).
-            if ($usage->latencyMs > 0 && !$websocket) {
-                $exchange->durationMs = $usage->latencyMs;
-            }
-            if (0 === $exchange->inputTokens + $exchange->outputTokens) {
-                $exchange->inputTokens = $usage->inputTokens;
-                $exchange->outputTokens = $usage->outputTokens;
-                $exchange->cacheReadTokens = $usage->cacheReadTokens;
-                $exchange->cacheCreationTokens = $usage->cacheCreationTokens;
-                $exchange->reasoningTokens = $usage->reasoningTokens;
-            }
+            $this->enrich($exchange, $usage);
             // Each link is visible to the next query: two turns never take the same record.
             $entityManager->flush();
         }
-        $entityManager->flush();
         $entityManager->clear();
+    }
+
+    /** What the usage record adds to an exchange: account, session, kind, CLIProxyAPI's duration, tokens if none. */
+    private function enrich(Exchange $exchange, UsageRecord $usage): void
+    {
+        $websocket = str_ends_with($exchange->endpoint, '(ws)');
+        $exchange->authIndex = $usage->authIndex;
+        $exchange->account = $usage->account;
+        if ('' === $exchange->sessionId) {
+            $exchange->sessionId = $usage->sessionId;
+        }
+        if (Turn::KIND_SIDE !== $exchange->kind) {
+            $exchange->kind = match (true) {
+                $usage->isCompaction || 'compaction' === $usage->nodeKind => Turn::KIND_COMPACTION,
+                'fork' === $usage->nodeKind => Turn::KIND_FORK,
+                '' !== $usage->parentSessionId => Turn::KIND_SUBAGENT,
+                default => $exchange->kind,
+            };
+        }
+        // CLIProxyAPI's own measure beats the log file's write time (a WebSocket turn's timeline is exact already).
+        if ($usage->latencyMs > 0 && !$websocket) {
+            $exchange->durationMs = $usage->latencyMs;
+        }
+        if (0 === $exchange->inputTokens + $exchange->outputTokens) {
+            $exchange->inputTokens = $usage->inputTokens;
+            $exchange->outputTokens = $usage->outputTokens;
+            $exchange->cacheReadTokens = $usage->cacheReadTokens;
+            $exchange->cacheCreationTokens = $usage->cacheCreationTokens;
+            $exchange->reasoningTokens = $usage->reasoningTokens;
+        }
     }
 
     public function archiveFile(Exchange $exchange): ?string
@@ -544,17 +601,23 @@ class TrafficIngester
         if (false === $in || false === $out) {
             throw new ArchiveException('Cannot stream '.$name.' into the archive');
         }
+        $written = 0;
         while (!feof($in)) {
             $chunk = fread($in, 1_048_576);
-            if (false === $chunk || ('' !== $chunk && false === gzwrite($out, $chunk))) {
+            // A full disk answers 0 (not false): every chunk must go in whole.
+            if (false === $chunk || ('' !== $chunk && \strlen($chunk) !== gzwrite($out, $chunk))) {
                 fclose($in);
                 gzclose($out);
                 @unlink($temporary);
                 throw new ArchiveException('Cannot write the archive copy '.$temporary);
             }
+            $written += \strlen($chunk);
         }
         fclose($in);
-        gzclose($out);
+        if (!gzclose($out) || $written !== filesize($source)) {
+            @unlink($temporary);
+            throw new ArchiveException('The archive copy of '.$name.' is incomplete');
+        }
         chmod($temporary, 0o600);
         if (!rename($temporary, $path)) {
             throw new ArchiveException('Cannot move the archive copy into place: '.$path);
