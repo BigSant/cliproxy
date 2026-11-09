@@ -166,8 +166,8 @@ class ExchangeRepository extends ServiceEntityRepository
         return array_map(static fn (string $label, int $count) => ['label' => $label, 'count' => $count], array_keys($endings), $endings);
     }
 
-    /** @return list<Exchange> */
-    public function withoutAccount(\DateTimeImmutable $since): array
+    /** @return list<Exchange> the next page (by id) of exchanges still waiting for their usage record */
+    public function withoutAccount(\DateTimeImmutable $since, int $afterId = 0): array
     {
         return $this->createQueryBuilder('e')
             ->where("e.authIndex = ''")
@@ -175,10 +175,10 @@ class ExchangeRepository extends ServiceEntityRepository
             ->andWhere("e.requestTail <> '' OR e.sessionId <> ''")
             ->andWhere('e.usageRecordId IS NULL')
             ->andWhere('e.occurredAt >= :since')
+            ->andWhere('e.id > :after')
             ->setParameter('since', $since, 'utc_datetime_immutable')
-            // Oldest first: a WebSocket connection's turns take its usage records in order.
-            ->orderBy('e.occurredAt', 'ASC')
-            ->addOrderBy('e.id', 'ASC')
+            ->setParameter('after', $afterId)
+            ->orderBy('e.id', 'ASC')
             ->setMaxResults(500)
             ->getQuery()
             ->getResult();

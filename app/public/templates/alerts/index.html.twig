@@ -12,6 +12,12 @@
                     <button class="button">Bandyti karantino failus dar kartą</button>
                 </form>
             {% endif %}
+            {% if open|filter(a => a.alertKey == 'usage:broken')|length %}
+                <form method="post" action="{{ path('app_alerts_broken_seen') }}">
+                    <input type="hidden" name="_token" value="{{ csrf_token('alerts') }}">
+                    <button class="button">Nutrūkusias spool eilutes peržiūrėjau</button>
+                </form>
+            {% endif %}
             <a class="button" href="{{ path('app_settings') }}#ntfy">Pranešimai į telefoną (ntfy)</a>
         </div>
     </div>

@@ -187,11 +187,19 @@ class CollectCommand
                 }
             }
         }
-        if (isset($this->errors['usage']) && !isset($conditions['cliproxy'])) {
-            $conditions['collector:usage'] = ['level' => Alert::WARNING, 'message' => 'Usage įrašų nepavyko įrašyti: '.$this->errors['usage']
-                .($this->spool->writable() ? ' (jie spool\'e ir bus įrašyti vėliau).' : ' Spool\'o irgi nepavyksta rašyti – įrašai paliekami CLIProxyAPI eilėje (ji juos laiko valandą).')];
+        if ($this->collector->lost > 0) {
+            // This run's loss, pushed as an error (the database may well be back by the alerts step).
+            $conditions['usage:lost'] = ['level' => Alert::ERROR, 'message' => \sprintf('%d usage įrašų neįrašyta nei į spool\'ą, nei į DB – jų kopija tik cron log\'e (eilutės „usage-record-lost“).', $this->collector->lost)];
         }
-        $broken = (array) ($this->settings->get(Settings::USAGE_BROKEN_LINES) ?? []);
+        if (isset($this->errors['usage']) && !isset($conditions['cliproxy'])) {
+            $conditions['collector:usage'] = ['level' => Alert::WARNING, 'message' => 'Usage įrašų nepavyko įrašyti: '.$this->errors['usage'].match ($this->collector->usageOutcome) {
+                Collector::IN_SPOOL => ' (jie spool\'e ir bus įrašyti vėliau).',
+                Collector::LEFT_IN_QUEUE => ' Nei spool\'as, nei DB jų nepriima – paliekami CLIProxyAPI eilėje (ji juos laiko valandą).',
+                default => '.',
+            }];
+        }
+        $seen = (array) ($this->settings->get(Settings::USAGE_BROKEN_LINES_SEEN) ?? []);
+        $broken = array_filter((array) ($this->settings->get(Settings::USAGE_BROKEN_LINES) ?? []), static fn ($count, $day) => $count > ($seen[$day] ?? 0), \ARRAY_FILTER_USE_BOTH);
         if ([] !== $broken) {
             $conditions['usage:broken'] = ['level' => Alert::WARNING, 'message' => 'Usage spool\'e yra neperskaitomų (nutrūkusių) eilučių: '
                 .implode(', ', array_map(static fn ($day, $count) => "$day – $count", array_keys($broken), $broken)).'. Jos paliktos faile.'];

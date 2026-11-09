@@ -24,6 +24,7 @@
         <server name="TRAFFIC_ARCHIVE_DIR" value="/tmp/cliproxy-test/archive" force="true" />
         <server name="USAGE_SPOOL_DIR" value="/tmp/cliproxy-test/usage" force="true" />
         <server name="HEALTH_RETRY_MICROSECONDS" value="0" force="true" />
+        <server name="HEALTH_DEADLINE_SECONDS" value="1" force="true" />
     </php>
 
     <testsuites>

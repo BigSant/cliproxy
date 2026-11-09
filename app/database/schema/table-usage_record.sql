@@ -37,5 +37,6 @@ CREATE TABLE `usage_record` (
   KEY `usage_occurred` (`occurred_at`),
   KEY `usage_account` (`auth_index`,`occurred_at`),
   KEY `usage_session` (`session_id`),
-  KEY `usage_request` (`request_tail`)
+  KEY `usage_request` (`request_tail`),
+  KEY `usage_request_id` (`request_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;

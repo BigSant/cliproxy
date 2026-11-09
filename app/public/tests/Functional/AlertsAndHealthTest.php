@@ -93,6 +93,8 @@ class AlertsAndHealthTest extends WebTestCase
     {
         $watchdog = self::getContainer()->get(\App\Alert\Watchdog::class);
         @mkdir('/tmp/cliproxy-test', 0o777, true);
+        // What an earlier run left is not this test's state.
+        array_map('unlink', glob('/tmp/cliproxy-test/.{heartbeat,ntfy,watchdog-state}', \GLOB_BRACE) ?: []);
         $watchdog->beat('https://ntfy.sh/hub-test');
         self::assertSame([], $watchdog->check());
 

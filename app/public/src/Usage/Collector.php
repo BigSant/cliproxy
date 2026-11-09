@@ -26,7 +26,15 @@ class Collector
     /** A passive limits snapshot from response headers at most this often per account. */
     private const int HEADER_SNAPSHOT_SECONDS = 60;
 
+    /** What became of the records when collectUsage() failed: in the spool, left in CLIProxyAPI's queue, or lost. */
+    public const string IN_SPOOL = 'spool';
+    public const string LEFT_IN_QUEUE = 'queue';
+    public const string LOST = 'lost';
+
     private bool $limitsChanged = false;
+    public private(set) ?string $usageOutcome = null;
+    /** Records neither the spool nor the database took, over this process. */
+    public private(set) int $lost = 0;
 
     public function __construct(
         private readonly ManagementClient $client,
@@ -51,6 +59,7 @@ class Collector
      */
     public function collectUsage(): int
     {
+        $this->usageOutcome = null;
         $stored = 0;
         $failure = null;
         try {
@@ -63,10 +72,11 @@ class Collector
         }
         $done = $failed = [];
         do {
-            // Taken records need one place at least: with neither the spool nor the database writable they stay in
-            // CLIProxyAPI's queue (it keeps them an hour) instead of being taken into nowhere.
-            if (!$this->spool->writable() && !$this->databaseReachable()) {
-                $failure ??= new \RuntimeException('Neither the usage spool nor the database can take records: they wait in CLIProxyAPI\'s queue');
+            // Taken records need one place at least: with neither the spool nor the database able to take them they
+            // stay in CLIProxyAPI's queue (it keeps them an hour) instead of being taken into nowhere.
+            if (!$this->spool->writable() && !$this->databaseWritable()) {
+                $this->usageOutcome = self::LEFT_IN_QUEUE;
+                $failure ??= new \RuntimeException('Neither the usage spool nor the database can take records');
                 break;
             }
             $records = array_map(UsageRecord::sanitize(...), $this->client->takeUsage(self::BATCH));
@@ -84,6 +94,7 @@ class Collector
             }
             if (null !== $day && $failure instanceof \Doctrine\DBAL\Exception) {
                 // The database is still away: the batch waits in the spool.
+                $this->usageOutcome ??= self::IN_SPOOL;
                 continue;
             }
             try {
@@ -93,10 +104,20 @@ class Collector
                 }
             } catch (\Throwable $exception) {
                 $failure ??= $exception;
+                $this->doctrine->resetManager();
                 if (null !== $day) {
                     $failed[$day] = true;
+                    $this->usageOutcome ??= self::IN_SPOOL;
+                    continue;
                 }
-                $this->doctrine->resetManager();
+                // Neither the spool nor the database took this batch: it is lost but for this copy on stderr (cron's
+                // log), and no further batch is taken.
+                $this->usageOutcome = self::LOST;
+                $this->lost += \count($records);
+                foreach ($records as $record) {
+                    fwrite(\STDERR, 'usage-record-lost '.json_encode($record, \JSON_UNESCAPED_UNICODE | \JSON_UNESCAPED_SLASHES | \JSON_INVALID_UTF8_SUBSTITUTE)."\n");
+                }
+                break;
             }
         } while (\count($records) === self::BATCH);
         foreach (array_keys(array_diff_key($done, $failed)) as $day) {
@@ -114,13 +135,18 @@ class Collector
     }
 
     /** @return int the records of the day the database did not have yet */
-    private function databaseReachable(): bool
+    /** A write, not a read: a database that answers but cannot write (read-only, full) is no place for records. */
+    private function databaseWritable(): bool
     {
         try {
-            $this->doctrine->getConnection()->executeQuery('SELECT 1 FROM usage_record WHERE 1 = 0');
+            $this->settings->set(Settings::USAGE_WRITE_PROBE, $this->clock->now()->format(\DATE_ATOM));
+            // A write statement on the table itself (no row): a read-only or missing table refuses it.
+            $this->doctrine->getConnection()->executeStatement('UPDATE usage_record SET superseded = superseded WHERE id = 0');
 
             return true;
         } catch (\Throwable) {
+            $this->doctrine->resetManager();
+
             return false;
         }
     }
@@ -341,7 +367,7 @@ class Collector
         $order = 0;
         foreach ($rows as $row) {
             if ('' !== $row->requestId) {
-                $byRequest[$row->requestId][] = ['at' => $row->occurredAt->getTimestamp() + $row->occurredMicros / 1e6, 'failed' => $row->failed, 'row' => $row, 'id' => null, 'order' => \PHP_INT_MAX / 2 + ++$order];
+                $byRequest[$row->requestId][] = ['at' => $row->occurredAt->getTimestamp() + $row->occurredMicros / 1e6, 'failed' => $row->failed, 'row' => $row, 'id' => null, 'order' => intdiv(\PHP_INT_MAX, 2) + ++$order];
             }
         }
         if ([] === $byRequest) {
