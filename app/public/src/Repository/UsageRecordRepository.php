@@ -209,10 +209,10 @@ class UsageRecordRepository extends ServiceEntityRepository
      * A Codex WebSocket turn's usage record: the connection's request id (all its turns share it) or, without one, the
      * session. CLIProxyAPI stamps a record with its attempt's start, after the timeline's request, so a turn's records
      * lie from its start to the connection's next turn's start (exclusive, to the microsecond). Of those the last one
-     * not linked yet: after a switch to another account, the attempt that answered. Superseded attempts count too –
+     * not linked yet, of the turn's model if there is one: after a switch to another account, the attempt that answered. Superseded attempts count too –
      * a failed turn the next one followed has only such a record.
      */
-    public function forWebsocketTurn(string $requestTail, string $sessionId, \DateTimeImmutable $at, ?\DateTimeImmutable $nextTurnAt = null): ?UsageRecord
+    public function forWebsocketTurn(string $requestTail, string $sessionId, \DateTimeImmutable $at, ?\DateTimeImmutable $nextTurnAt = null, string $model = ''): ?UsageRecord
     {
         $until = $at->modify('+30 minutes');
         if (null !== $nextTurnAt && $nextTurnAt < $until) {
@@ -238,15 +238,20 @@ class UsageRecordRepository extends ServiceEntityRepository
         $micros = static fn (\DateTimeImmutable $instant) => $instant->getTimestamp() * 1_000_000 + (int) $instant->format('u');
         $from = $micros($at);
         $to = $micros($until);
-        $last = null;
+        // The turn's own model first (an image generation adds a record of another model at the same instant), then
+        // the latest attempt, then the first one queued.
+        $best = null;
         foreach ($query->getQuery()->getResult() as $record) {
             $time = $record->occurredAt->getTimestamp() * 1_000_000 + $record->occurredMicros;
-            if ($time >= $from && $time < $to && (null === $last || $time >= $last[0])) {
-                $last = [$time, $record];
+            // A record from before the microseconds were kept (0) may lie anywhere in its second.
+            $latest = 0 === $record->occurredMicros ? $time + 999_999 : $time;
+            $rank = [(int) ('' !== $model && $record->model === $model), $time];
+            if ($latest >= $from && $time < $to && (null === $best || $rank > $best[0])) {
+                $best = [$rank, $record];
             }
         }
 
-        return $last[1] ?? null;
+        return $best[1] ?? null;
     }
 
     /** @return list<array<string, int|string>> */

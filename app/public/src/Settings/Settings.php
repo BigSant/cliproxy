@@ -37,6 +37,11 @@ class Settings
     public const string USAGE_BROKEN_LINES_SEEN = 'usage_broken_lines_seen';
     /** Written to tell whether the database takes writes (when the usage spool does not). */
     public const string USAGE_WRITE_PROBE = 'usage_write_probe';
+    /** Set when a usage batch was lost: the queue is taken again only once the spool can hold it. */
+    public const string USAGE_TAKING_HALTED = 'usage_taking_halted';
+    /** Usage records lost so far (neither the spool nor the database took them), and those the person has seen. */
+    public const string USAGE_LOST = 'usage_lost';
+    public const string USAGE_LOST_SEEN = 'usage_lost_seen';
     /** The traffic log (CLIProxyAPI request-log): on unless false; ConfigBaseline keeps CLIProxyAPI to it. */
     public const string REQUEST_LOG = 'request_log';
     /** Set by Įspėjimai; the collector moves the quarantined request logs back into logs/. */

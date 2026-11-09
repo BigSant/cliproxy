@@ -24,6 +24,19 @@ class UsageRecordTest extends TestCase
         self::assertSame('2026-11-09 12:00:00', $record->occurredAt->format('Y-m-d H:i:s'));
     }
 
+    public function testCodexInputIsCountedWithoutTheCachedTokensAsClaudesIs(): void
+    {
+        $codex = ['timestamp' => '2026-11-09T12:00:00Z', 'provider' => 'codex', 'tokens' => ['input_tokens' => 5000, 'cached_tokens' => 4000, 'output_tokens' => 60, 'total_tokens' => 5060]];
+        self::assertSame([1000, 4000], [UsageRecord::fromQueueRecord($codex)->inputTokens, UsageRecord::fromQueueRecord($codex)->cacheReadTokens]);
+
+        // CLIProxyAPI's own breakdown when it has one.
+        $codex['token_breakdown'] = ['schema_version' => 2, 'input' => ['total_tokens' => 5000, 'uncached_tokens' => 990, 'cache_read_tokens' => 4010]];
+        self::assertSame(990, UsageRecord::fromQueueRecord($codex)->inputTokens);
+
+        $claude = ['timestamp' => '2026-11-09T12:00:00Z', 'provider' => 'claude', 'tokens' => ['input_tokens' => 10, 'cache_read_tokens' => 4000]];
+        self::assertSame(10, UsageRecord::fromQueueRecord($claude)->inputTokens);
+    }
+
     public function testTheClientKeyAndUnneededHeadersNeverReachStorage(): void
     {
         $record = UsageRecord::sanitize(['api_key' => 'cpa-0123456789abcdef', 'response_headers' => [

@@ -38,14 +38,21 @@ class AlertController extends AbstractController
         return $this->redirectToRoute('app_alerts');
     }
 
-    /** The broken spool lines known now are seen: the alert comes back only for new ones. The lines stay in the files. */
-    #[Route('/alerts/broken-lines-seen', name: 'app_alerts_broken_seen', methods: ['POST'])]
-    public function brokenLinesSeen(Request $request, Settings $settings): RedirectResponse
+    /**
+     * What is known now is seen – the broken spool lines, the lost records: their alert comes back only for new ones.
+     * Nothing is deleted.
+     */
+    #[Route('/alerts/seen/{what}', name: 'app_alerts_seen', requirements: ['what' => 'broken|lost'], methods: ['POST'])]
+    public function seen(string $what, Request $request, Settings $settings): RedirectResponse
     {
         if (!$this->isCsrfTokenValid('alerts', (string) $request->request->get('_token'))) {
             throw $this->createAccessDeniedException('Invalid CSRF token');
         }
-        $settings->set(Settings::USAGE_BROKEN_LINES_SEEN, (array) ($settings->get(Settings::USAGE_BROKEN_LINES) ?? []));
+        if ('broken' === $what) {
+            $settings->set(Settings::USAGE_BROKEN_LINES_SEEN, (array) ($settings->get(Settings::USAGE_BROKEN_LINES) ?? []));
+        } else {
+            $settings->set(Settings::USAGE_LOST_SEEN, (int) $settings->get(Settings::USAGE_LOST));
+        }
         $this->addFlash('success', 'Pažymėta. Įspėjimas užsidarys per minutę.');
 
         return $this->redirectToRoute('app_alerts');

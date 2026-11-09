@@ -32,8 +32,9 @@ class TrafficIngester
     /** Held while request logs are taken in, re-read or moved: by the collector's traffic steps, reparse and retry. */
     public const string LOCK = 'app-traffic';
     /** MySQL errors of the server, not of the data: gone away, lost connection, too many connections, shutting
-     * down, disk or table full, storage engine error, lock wait, deadlock. */
-    private const array TRANSIENT_MYSQL_CODES = [1021, 1030, 1040, 1053, 1114, 1205, 1213, 2002, 2003, 2006, 2013];
+     * down, disk or table full, storage engine error, lock wait, deadlock; and an unknown column or table – during a
+     * deploy the new code runs for a moment before its migration. */
+    private const array TRANSIENT_MYSQL_CODES = [1021, 1030, 1040, 1053, 1054, 1114, 1146, 1205, 1213, 2002, 2003, 2006, 2013];
     /** Attempts on one file before the quarantine: the process died on it this many times. */
     private const int MAX_ATTEMPTS = 2;
 
@@ -536,7 +537,7 @@ class TrafficIngester
         $neverLinked = Turn::KIND_SIDE === $exchange->kind && ($websocket || str_contains($exchange->endpoint, 'count_tokens'));
         $usage = $neverLinked ? null
             : ($websocket
-                ? $this->usage->forWebsocketTurn($exchange->requestTail, $exchange->sessionId, self::startOf($exchange), $this->nextTurnAt($exchange))
+                ? $this->usage->forWebsocketTurn($exchange->requestTail, $exchange->sessionId, self::startOf($exchange), $this->nextTurnAt($exchange), $exchange->model)
                 : $this->usage->forRequest($exchange->requestTail, $exchange->occurredAt));
         if (null === $usage) {
             // Three hours without a record: it is not coming (usage off then, a record lost upstream).
@@ -589,8 +590,9 @@ class TrafficIngester
         if ($usage->latencyMs > 0 && !$websocket) {
             $exchange->durationMs = $usage->latencyMs;
         }
-        // A failed turn never takes the tokens of an answer (a record that is not its own would double them).
-        if (0 === $exchange->inputTokens + $exchange->outputTokens && $exchange->failed === $usage->failed) {
+        // The record is the turn's own (exact windows), so a turn cut off before its answer reached the client gets
+        // the tokens upstream counted.
+        if (0 === $exchange->inputTokens + $exchange->outputTokens) {
             $exchange->inputTokens = $usage->inputTokens;
             $exchange->outputTokens = $usage->outputTokens;
             $exchange->cacheReadTokens = $usage->cacheReadTokens;

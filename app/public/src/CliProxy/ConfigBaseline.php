@@ -76,6 +76,10 @@ class ConfigBaseline
         if ($requestLog && true !== ($logs['request-log'] ?? null)) {
             $violations[] = 'request-log neįjungtas (observability.logs.request-log: true; išjunk Nustatymuose → Srauto žurnalas, jei tikrai reikia)';
         }
+        // Full-duplex steering: CLIProxyAPI then logs one request per socket, and the journal's turns run together.
+        if (true === ($config['upstream']['codex']['response-steering'] ?? false)) {
+            $violations[] = 'upstream.codex.response-steering įjungtas – srauto žurnalas nebeatskirtų WS turn\'ų';
+        }
         $keys = $config['access']['api-keys'] ?? null;
         if (!\is_array($keys) || [] === array_filter($keys, static fn ($key) => \is_string($key) && '' !== trim($key))) {
             $violations[] = 'nėra nė vieno kliento rakto (access.api-keys) – autentifikacija būtų išjungta';
