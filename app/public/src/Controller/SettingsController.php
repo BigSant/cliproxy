@@ -2,12 +2,11 @@
 
 namespace App\Controller;
 
-use App\CliProxy\ClaudeCodeVersion;
 use App\CliProxy\ConfigBaseline;
+use App\CliProxy\Harnesses;
 use App\CliProxy\ConfigConflictException;
 use App\CliProxy\ManagementClient;
 use App\CliProxy\ManagementException;
-use App\Repository\UsageRecordRepository;
 use App\Settings\Settings;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\RedirectResponse;
@@ -34,7 +33,6 @@ class SettingsController extends AbstractController
         private readonly ManagementClient $client,
         private readonly Settings $settings,
         private readonly TranslatorInterface $translator,
-        private readonly UsageRecordRepository $usage,
     ) {
     }
 
@@ -69,9 +67,13 @@ class SettingsController extends AbstractController
             'yaml' => $yaml,
             'etag' => $etag,
             'ntfyUrl' => (string) ($this->settings->get(Settings::NTFY_URL) ?? ''),
-            'claudeUserAgent' => ClaudeCodeVersion::configured($config),
-            'claudeSeen' => $this->usage->newestClaudeCodeVersion(),
-            'claudePath' => ClaudeCodeVersion::PATH,
+            'harnesses' => array_map(static fn (string $harness) => [
+                'name' => $harness,
+                'sent' => Harnesses::configured($config, $harness),
+                'path' => implode('.', Harnesses::ALL[$harness]['path']),
+            ], array_keys(Harnesses::ALL)),
+            'harnessLatest' => (array) ($this->settings->get(Settings::HARNESS_LATEST) ?? []),
+            'harnessCheckedAt' => $this->settings->instant(Settings::CLIPROXY_LATEST_CHECKED_AT),
         ]);
     }
 

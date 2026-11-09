@@ -44,11 +44,22 @@
         </form>
     </section>
 
-    <section class="card" id="claude-code">
-        <h2>{{ 'settings.claude_code'|trans }}</h2>
-        <p>{{ 'settings.claude_code_sent'|trans }} <code>{{ claudeUserAgent ?? 'settings.claude_code_default'|trans }}</code></p>
-        <p>{{ 'settings.claude_code_seen'|trans }} {% if claudeSeen %}<code>{{ claudeSeen }}</code>{% else %}<span class="muted">{{ 'settings.claude_code_none'|trans }}</span>{% endif %}</p>
-        <p class="muted small">{{ 'settings.claude_code_explain_html'|trans({'%path%': claudePath|e})|raw }}</p>
+    <section class="card" id="harnesses">
+        <h2>{{ 'settings.harnesses'|trans }}</h2>
+        <p class="muted">{{ 'settings.harnesses_explain'|trans }}</p>
+        <table>
+            <thead><tr><th></th><th>{{ 'settings.harness_sent'|trans }}</th><th>{{ 'settings.harness_latest'|trans }}</th></tr></thead>
+            <tbody>
+            {% for harness in harnesses %}
+                <tr>
+                    <td>{{ ('settings.harness.' ~ harness.name)|trans }}</td>
+                    <td><code>{{ harness.sent ?? 'settings.harness_default'|trans }}</code><br><span class="muted small"><code>{{ harness.path }}</code></span></td>
+                    <td>{{ harnessLatest[harness.name] ?? '–' }}</td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+        {% if harnessCheckedAt %}<p class="muted small">{{ 'settings.harness_checked'|trans({'%at%': harnessCheckedAt|date('Y-m-d H:i')}) }}</p>{% endif %}
     </section>
 
     <section class="card">
