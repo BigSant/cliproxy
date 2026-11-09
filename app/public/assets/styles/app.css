@@ -336,6 +336,8 @@ button.link:hover { color: var(--text); text-decoration: underline; }
 .swatch-total { background: color-mix(in srgb, var(--accent) 35%, var(--bar-bg)); }
 .swatch-cache { background: var(--accent); margin-left: .6rem; }
 
+.note-box { margin-top: 1rem; padding: .8rem 1rem; border-radius: 10px; border: 1px solid color-mix(in srgb, var(--warn) 45%, var(--border)); background: color-mix(in srgb, var(--warn) 8%, var(--surface)); font-size: .9rem; line-height: 1.55; }
+.note-box .muted { display: block; margin-top: .3rem; font-size: .85em; }
 pre.code { background: var(--surface-2); padding: 1rem; border-radius: 10px; overflow-x: auto; margin: 0 0 .75rem; }
 pre.code code { background: none; padding: 0; }
 .live-dot { width: .6rem; height: .6rem; border-radius: 50%; background: var(--ok); animation: pulse 2s infinite; margin-top: .4rem; }

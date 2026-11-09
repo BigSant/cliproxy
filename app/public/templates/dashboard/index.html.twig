@@ -19,6 +19,7 @@
             <div class="stat-value">{{ totals.cache_read|tokens }} <span class="muted">/ {{ totals.cache_creation|tokens }}</span></div>
             <div class="stat-sub">skaitymų dalis {{ totals.cache_read|share(totals.cache_read + totals.cache_creation + totals.input) }}</div>
         </div>
+        {% include '_parts/cache_ttl_stat.html.twig' %}
         <div class="stat {{ affinity.moved > 0 ? 'stat-warn' }}">
             <div class="stat-label">Session affinity</div>
             <div class="stat-value">{{ affinity.sessions - affinity.moved }}<span class="muted">/{{ affinity.sessions }}</span></div>

@@ -15,10 +15,18 @@
   "env": {
     "ANTHROPIC_BASE_URL": "{{ url }}",
     "ANTHROPIC_AUTH_TOKEN": "{{ key_text }}"
-  }
+  },
+  "promptCacheTtl": "1h"
 }{% endset %}
         <pre class="code"><code>{{ claude }}</code></pre>
         <button type="button" class="button" data-copy="{{ claude }}">Kopijuoti</button>
+        <div class="note-box">
+            <strong><code>promptCacheTtl: "1h"</code> būtinas.</strong> Su savu <code>ANTHROPIC_BASE_URL</code> ir token'u Claude Code
+            (pastebėta 2.1.312) prompt cache rašo 5 min., ne 1 val., kaip prisijungus prenumerata tiesiogiai: po kiekvienos ilgesnės
+            pauzės visas cache rašomas iš naujo ir 5 val. bei savaitės limitai tirpsta greičiau. Subagentams – atskiras
+            <code>subagentPromptCacheTtl</code> (numatyta dažniausiai 5 min.). Ar veikia, rodo Apžvalgos kortelė „Cache rašymai 1 val. / 5 min.“.
+            <span class="muted">Šaltinis: gist'o komentarai (EtanHey, mmmattG), <a href="https://code.claude.com/docs/en/prompt-caching#choose-the-ttl-yourself" rel="noopener noreferrer" target="_blank">Claude Code dokumentacija</a>.</span>
+        </div>
         <p class="muted small">Nekeisdamas įprastos konfigūracijos: <code>CLAUDE_CONFIG_DIR=~/.claude-hub claude</code> su šiuo failu <code>~/.claude-hub/settings.json</code>.</p>
     </section>
 
@@ -36,6 +44,12 @@ experimental_bearer_token = "{{ key_text }}"{% endset %}
         <pre class="code"><code>{{ codex }}</code></pre>
         <button type="button" class="button" data-copy="{{ codex }}">Kopijuoti</button>
         <p class="muted small">Atskirai: <code>CODEX_HOME=~/.codex-hub codex</code>. T3 Code – „Use existing CLI“.</p>
+        <div class="note-box">
+            <strong>T3 Code: dvigubi usage įrašai.</strong> Jei T3 Code rodo naudojimą dvigubai, nustatyk
+            <code>requires_openai_auth = true</code> po <code>[model_providers.cliproxy]</code>. Tam reikia vietinio ChatGPT
+            prisijungimo ta paskyra, kuri yra hub'e; užklausos vis tiek eina per hub'ą su šiuo raktu.
+            <span class="muted">Šaltinis: gist'o komentaras (mmmattG, CLIProxyAPI 8.0.45), nepatikrinta.</span>
+        </div>
     </section>
 
     <section class="card">

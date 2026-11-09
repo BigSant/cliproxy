@@ -18,6 +18,8 @@ CREATE TABLE `usage_record` (
   `failed` tinyint NOT NULL,
   `status_code` int NOT NULL,
   `request_tail` varchar(8) NOT NULL DEFAULT '',
+  `cache_creation5m_tokens` int NOT NULL DEFAULT '0',
+  `cache_creation1h_tokens` int NOT NULL DEFAULT '0',
   PRIMARY KEY (`id`),
   KEY `usage_occurred` (`occurred_at`),
   KEY `usage_account` (`auth_index`,`occurred_at`),

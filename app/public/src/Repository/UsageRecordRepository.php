@@ -17,14 +17,15 @@ class UsageRecordRepository extends ServiceEntityRepository
 {
     private const string SUMS = 'COUNT(*) AS requests, SUM(CASE WHEN failed = 1 THEN 1 ELSE 0 END) AS failed,'
         .' SUM(input_tokens) AS input, SUM(output_tokens) AS output, SUM(cache_read_tokens) AS cache_read,'
-        .' SUM(cache_creation_tokens) AS cache_creation, SUM(total_tokens) AS total';
+        .' SUM(cache_creation_tokens) AS cache_creation, SUM(cache_creation5m_tokens) AS cache_5m,'
+        .' SUM(cache_creation1h_tokens) AS cache_1h, SUM(total_tokens) AS total';
 
     public function __construct(ManagerRegistry $registry)
     {
         parent::__construct($registry, UsageRecord::class);
     }
 
-    /** @return array{requests: int, failed: int, input: int, output: int, cache_read: int, cache_creation: int, total: int} */
+    /** @return array{requests: int, failed: int, input: int, output: int, cache_read: int, cache_creation: int, cache_5m: int, cache_1h: int, total: int} */
     public function totals(\DateTimeImmutable $since): array
     {
         $row = $this->since($since)->select(self::SUMS)->fetchAssociative() ?: [];
@@ -139,12 +140,12 @@ class UsageRecordRepository extends ServiceEntityRepository
     /**
      * @param array<string, mixed> $row
      *
-     * @return array{requests: int, failed: int, input: int, output: int, cache_read: int, cache_creation: int, total: int}
+     * @return array{requests: int, failed: int, input: int, output: int, cache_read: int, cache_creation: int, cache_5m: int, cache_1h: int, total: int}
      */
     private static function numbers(array $row): array
     {
         $numbers = [];
-        foreach (['requests', 'failed', 'input', 'output', 'cache_read', 'cache_creation', 'total'] as $key) {
+        foreach (['requests', 'failed', 'input', 'output', 'cache_read', 'cache_creation', 'cache_5m', 'cache_1h', 'total'] as $key) {
             $numbers[$key] = (int) ($row[$key] ?? 0);
         }
 
