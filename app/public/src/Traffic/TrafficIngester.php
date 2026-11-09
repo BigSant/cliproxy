@@ -29,6 +29,8 @@ class TrafficIngester
     private const int MAX_PARSE_BYTES = 256 * 1_048_576;
     /** usage_record_id of an exchange that will not get one (a prewarm, a token count, a record that never came). */
     private const string NOT_LINKED = '0';
+    /** log_file prefix of a turn read from a WebSocket connection still open (collectLiveTurns). */
+    public const string LIVE = 'live:';
     /** Held while request logs are taken in, re-read or moved: by the collector's traffic steps, reparse and retry. */
     public const string LOCK = 'app-traffic';
     /** MySQL errors of the server, not of the data: gone away, lost connection, too many connections, shutting
@@ -251,6 +253,7 @@ class TrafficIngester
             foreach (WebsocketTimeline::turns($timeline) as $index => $turn) {
                 $exchange = $this->exchangeFor(mb_substr($name, 0, 180).'#'.($index + 1));
                 $this->fillWebsocketTurn($exchange, $name, $log, $turn);
+                $this->supersedeLive($exchange);
                 $this->reenrich($exchange);
                 $exchange->archivePath = $archived;
                 // Saved turn by turn: a later turn's tool results find the calls of the earlier ones.
@@ -565,6 +568,9 @@ class TrafficIngester
     /** When the same WebSocket connection's next turn started: this turn's record was written before it. */
     private function nextTurnAt(Exchange $exchange): ?\DateTimeImmutable
     {
+        if (str_starts_with($exchange->logFile, self::LIVE)) {
+            return $this->nextLiveTurnAt($exchange);
+        }
         if (!preg_match('/^(.*)#(\d+)$/', $exchange->logFile, $match)) {
             return null;
         }
@@ -572,6 +578,93 @@ class TrafficIngester
         $next = $this->exchanges->findOneBy(['logFile' => $match[1].'#'.((int) $match[2] + 1)]);
 
         return null === $next ? null : self::startOf($next);
+    }
+
+    /**
+     * Turns of Codex WebSocket connections still open. CLIProxyAPI writes a connection's log file only when it closes
+     * (a client may hold it for hours); meanwhile each turn is a part file in logs/request-log-parts-websocket-
+     * timeline-*. A part whose answer ended (or that is idle for ten minutes) becomes an exchange named "live:<dir>/
+     * <part>", read once. The connection's file, when it comes, brings the same turns with its headers and request id:
+     * the live ones are then marked superseded. CLIProxyAPI's files are only read.
+     *
+     * @return int turns taken in
+     */
+    public function collectLiveTurns(): int
+    {
+        $taken = 0;
+        $now = $this->clock->now()->getTimestamp();
+        $entityManager = $this->doctrine->getManager();
+        foreach (glob($this->logDirectory.'/request-log-parts-websocket-timeline-*/*.tmp') ?: [] as $part) {
+            $modified = (int) filemtime($part);
+            $key = self::LIVE.basename(\dirname($part)).'/'.basename($part);
+            if ($modified > $now - self::SETTLE_SECONDS || null !== $this->exchanges->findOneBy(['logFile' => $key])) {
+                continue;
+            }
+            $text = (string) file_get_contents($part, false, null, 0, self::MAX_PARSE_BYTES);
+            if ($modified > $now - 600 && !preg_match('/"type":\s*"response\.(completed|done|failed|incomplete)"/', $text)) {
+                continue;
+            }
+            foreach (WebsocketTimeline::turns($text) as $turn) {
+                $exchange = $this->exchangeFor(mb_substr($key, 0, 190));
+                $at = $turn['at'] ?? $this->clock->now();
+                $log = new RequestLog(['URL' => '/v1/responses', 'Timestamp' => $at->format('Y-m-d\TH:i:s.uP')], [], '', [], null, [], '');
+                $this->fillWebsocketTurn($exchange, $key, $log, $turn);
+                // No headers in a part: CLIProxyAPI's session is the request's prompt_cache_key.
+                $exchange->sessionId = mb_substr((string) ($turn['request']['prompt_cache_key'] ?? $exchange->sessionId), 0, 64);
+                $exchange->archivePath = '';
+                // The connection closed and its file came in first: that turn is the one to keep.
+                if (0 < (int) $entityManager->createQuery('SELECT COUNT(e.id) FROM App\Entity\Exchange e WHERE e.logFile NOT LIKE :live AND e.occurredAt = :at AND e.occurredMicros = :micros')
+                    ->setParameter('live', self::LIVE.'%')->setParameter('at', $exchange->occurredAt, 'utc_datetime_immutable')->setParameter('micros', $exchange->occurredMicros)
+                    ->getSingleScalarResult()) {
+                    $exchange->kind = Exchange::KIND_SUPERSEDED;
+                }
+                $entityManager->persist($exchange);
+                $entityManager->flush();
+                ++$taken;
+                break;
+            }
+        }
+        $entityManager->clear();
+
+        return $taken;
+    }
+
+    /** A turn of a closed connection replaces the live one it was read as. */
+    private function supersedeLive(Exchange $turn): void
+    {
+        $this->doctrine->getManager()->createQuery("UPDATE App\Entity\Exchange e SET e.kind = 'superseded' WHERE e.logFile LIKE :live AND e.occurredAt = :at AND e.occurredMicros = :micros")
+            ->setParameter('live', self::LIVE.'%')
+            ->setParameter('at', $turn->occurredAt, 'utc_datetime_immutable')
+            ->setParameter('micros', $turn->occurredMicros)
+            ->execute();
+    }
+
+    /** The next turn of a live connection: the earliest later start among its part files (each begins with it). */
+    private function nextLiveTurnAt(Exchange $exchange): ?\DateTimeImmutable
+    {
+        $directory = $this->logDirectory.'/'.\dirname(substr($exchange->logFile, \strlen(self::LIVE)));
+        $start = self::startOf($exchange);
+        $next = null;
+        foreach (glob($directory.'/*.tmp') ?: [] as $part) {
+            $handle = @fopen($part, 'rb');
+            $line = false === $handle ? false : fgets($handle);
+            if (false !== $handle) {
+                fclose($handle);
+            }
+            if (false === $line || !preg_match('/^Timestamp: (\S+)/', $line, $match)) {
+                continue;
+            }
+            try {
+                $at = (new \DateTimeImmutable($match[1]))->setTimezone(new \DateTimeZone('UTC'));
+            } catch (\Exception) {
+                continue;
+            }
+            if ($at > $start && (null === $next || $at < $next)) {
+                $next = $at;
+            }
+        }
+
+        return $next;
     }
 
     /** The exchange's start to the microsecond. */

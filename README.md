@@ -190,7 +190,10 @@ Apžvalgoje ir Įspėjimuose, kiti dirba toliau.
    nepavykę ne `superseded`, „bandymai“ = visi. Taip ir paskyrų, modelių, dienų suvestinės niekada netampa neigiamos;
    Codex WebSocket turn'ai turi bendrą `request_id`, bet po sėkmingo turn'o kitas nėra pakartojimas.
 2. Kas 5 s – request log'ai į žurnalą ir archyvą (klientų patikrinimai – `HEAD`, `OPTIONS`, Claude Code `/api/hello` –
-   tik į archyvą; prie modelio rodomas pasirinktas reasoning effort); kartą per paleidimą – paskyrų susiejimas (prewarm, `count_tokens` ir
+   tik į archyvą; prie modelio rodomas pasirinktas reasoning effort);
+   Codex WebSocket ryšys log failą gauna tik užsidaręs (T3 / Codex jį laiko atvirą valandomis), todėl jo turn'ai
+   skaitomi iš CLIProxyAPI dalinių failų (`logs/request-log-parts-websocket-timeline-*`, tik skaitomi) ir žymimi
+   „ryšys atviras“; atėjus galutiniam failui jie pažymimi `superseded`, o jų vietą užima galutiniai; kartą per paleidimą – paskyrų susiejimas (prewarm, `count_tokens` ir
    per 3 val. nesusieti įrašai pažymimi `usage_record_id = 0` ir eilės nebeužkemša; WS turn'as ima paskutinį laisvą
    įrašą nuo savo pradžios iki to paties ryšio kito turn'o pradžios, mikrosekundžių tikslumu – CLIProxyAPI įrašo laikas
    yra bandymo pradžia, po turn'o užklausos; nepavykęs turn'as svetimų tokenų neperima) ir „našlaičių“ WS dalių

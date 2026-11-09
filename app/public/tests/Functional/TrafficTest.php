@@ -215,6 +215,40 @@ class TrafficTest extends WebTestCase
         }
     }
 
+    public function testTurnsOfAnOpenWebsocketConnectionAreShownAndThenReplacedByItsFile(): void
+    {
+        $event = static fn (string $at, string $type, array $payload) => "Timestamp: 2026-11-09T15:00:$at+02:00\nEvent: websocket.$type\n".json_encode($payload)."\n";
+        $request = ['type' => 'response.create', 'model' => 'gpt-6.1-sol', 'prompt_cache_key' => 'sess-live', 'reasoning' => ['effort' => 'low'],
+            'input' => [['type' => 'message', 'role' => 'user', 'content' => 'Labas']]];
+        $done = ['type' => 'response.completed', 'response' => ['status' => 'completed', 'output' => [['type' => 'message', 'content' => [['type' => 'output_text', 'text' => 'Sveiki!']]]]]];
+        $part = $event('10.000000000', 'request', $request).$event('12.000000000', 'response', $done);
+        $directory = self::LOGS.'/request-log-parts-websocket-timeline-123';
+        mkdir($directory);
+        file_put_contents("$directory/request-1.tmp", $part);
+        // Still being written: waits.
+        file_put_contents("$directory/request-2.tmp", $event('20.000000000', 'request', $request));
+        touch("$directory/request-1.tmp", strtotime('2026-11-09 15:04:00 Europe/Vilnius'));
+        $this->entityManager->persist(UsageRecord::fromQueueRecord(['timestamp' => '2026-11-09T13:00:10.050Z', 'request_id' => 'conn-wsli1234', 'provider' => 'codex',
+            'source' => 'sol@x', 'auth_index' => 's', 'session_id' => 'sess-live', 'model' => 'gpt-6.1-sol']));
+        $this->entityManager->flush();
+        $ingester = self::getContainer()->get(TrafficIngester::class);
+
+        self::assertSame(1, $ingester->collectLiveTurns());
+        self::assertSame(0, $ingester->collectLiveTurns(), 'read once');
+        $ingester->linkAccounts();
+        $live = $this->entityManager->getRepository(Exchange::class)->findOneBy(['logFile' => 'live:request-log-parts-websocket-timeline-123/request-1.tmp']);
+        self::assertSame(['Labas', 'Sveiki!', 'low', 'sol@x'], [$live->prompt, $live->answer, $live->reasoningEffort, $live->account]);
+
+        // The connection closes: its file brings the same turn, the live one steps aside.
+        exec('rm -rf '.escapeshellarg($directory));
+        $this->write('v1-responses-2026-11-09T150000-wsli1234.log', "=== REQUEST INFO ===\nURL: /v1/responses\nMethod: GET\nTimestamp: 2026-11-09T15:00:00.000000000+02:00\n\n=== HEADERS ===\nUser-Agent: codex\n\n=== WEBSOCKET TIMELINE ===\n".$part."\n");
+        $ingester->ingest();
+        $this->entityManager->clear();
+        self::assertSame('superseded', $this->entityManager->getRepository(Exchange::class)->findOneBy(['logFile' => 'live:request-log-parts-websocket-timeline-123/request-1.tmp'])->kind);
+        $ingester->linkAccounts();
+        self::assertSame('sol@x', $this->entityManager->getRepository(Exchange::class)->findOneBy(['logFile' => 'v1-responses-2026-11-09T150000-wsli1234.log#1'])->account, 'the record goes to the final turn');
+    }
+
     public function testTakingAFileAgainReplacesItsRowsInsteadOfAdding(): void
     {
         $this->write('v1-messages-2026-11-09T150000-aaaa1111.log', RequestLogs::claudeToolUse());
