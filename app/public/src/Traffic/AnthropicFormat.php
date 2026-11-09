@@ -20,7 +20,11 @@ final class AnthropicFormat
             $turn->kind = Turn::KIND_SIDE;
         }
 
+        // Newer Claude Code adds its reminders as system messages after the person's (or the tools') user message.
         $last = end($messages);
+        while (\is_array($last) && 'system' === ($last['role'] ?? null)) {
+            $last = prev($messages);
+        }
         if (\is_array($last) && 'user' === ($last['role'] ?? null)) {
             self::readInput($last['content'] ?? '', $turn);
         }
