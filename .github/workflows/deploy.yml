@@ -20,6 +20,12 @@ name: Deploy
 run-name: Deploy ${{ github.sha }}
 on:
   workflow_dispatch:
+    inputs:
+      images:
+        description: "Containers: auto (when the deployed commits change them) or yes (also after a secret changed: a container takes its secrets when it is created)"
+        type: choice
+        options: [auto, 'yes']
+        default: auto
 permissions:
   contents: read
   checks: read
@@ -65,7 +71,8 @@ jobs:
           DEPLOY_ENVIRONMENT: production
           REF: ${{ github.sha }}
           BACKUP: "yes"
-          IMAGES: auto
+          # setup's make deploy copies code only; IMAGES=yes recreates the containers whose definition changed.
+          IMAGES: ${{ inputs.images || 'auto' }}
           CRON: auto
           CACHE: auto
           HUB_SECRET_APP_SECRET: ${{ secrets.PROD_APP_SECRET }}
