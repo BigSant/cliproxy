@@ -175,8 +175,11 @@ Apžvalgoje ir Įspėjimuose, kiti dirba toliau.
    pažymima „laukia“, tada įrašoma į DB ir žymė nuimama (write-ahead): lūžus procesui ar DB kitas paleidimas dieną
    įrašo pats; DB neveikiant eilė vis tiek imama (į spool'ą), kad CLIProxyAPI jos nepamestų, o jei nei spool'as (katalogas
    nerašomas ar laisvos vietos < 64 MB), nei DB (bandomasis rašymas) įrašų nepriima – eilė neliečiama (CLIProxyAPI ją
-   laiko valandą). Jei paketo nepriėmė nei spool'as, nei DB, daugiau paketų neimama, o to paketo įrašai išrašomi į
-   cron log'ą (`usage-record-lost …`) ir keliamas ERROR įspėjimas `usage:lost`. Lūžio nukirpta eilutė lieka atskira (kitas paketas
+   laiko valandą). Jei paketo nepriėmė nei spool'as, nei DB (pvz. pilnas diskas – bandomasis rašymas praeina, eilutės
+   ne), eilė neimama tol, kol spool'as vėl priims įrašus; to paketo įrašai išrašomi į cron log'ą (`usage-record-lost …`)
+   ir keliamas ERROR `usage:lost`, kuris lieka, kol pažymi „Prarastus įrašus peržiūrėjau“ (atkūrimas – žemiau,
+   „Kai kas nors lūžta“). Įvesties tokenai saugomi be cache (kaip Claude): Codex `input_tokens` cache apima, todėl
+   imama CLIProxyAPI `token_breakdown.input.uncached_tokens` arba `input − cache_read`. Lūžio nukirpta eilutė lieka atskira (kitas paketas
    prasideda nauja eilute), replay ją praleidžia ir apie ją praneša Įspėjimuose (mygtukas „peržiūrėjau“ įspėjimą uždaro iki naujų);
    failas neliečiamas. Kas valandą šiandiena ir
    vakar dar kartą (pigu, idempotentiška). Įrašas saugomas visas (`usage_record.raw`, plius `ttft_ms`, `user_agent`,
@@ -217,7 +220,9 @@ juostą.
 **Ribos, kurių hub'as neišsprendžia.** CLIProxyAPI usage eilė gyvena jo atmintyje (be patvirtinimo): įrašai, kurių
 kolektorius dar nepaėmė, dingsta perkūrus CLIProxyAPI (deploy, keičiantis `CLIPROXY_VERSION` ar `entrypoint.sh`);
 CLIProxyAPI request log'o rašymas srautui turi neblokuojančių kelių. Todėl „viskas išsaugota“ reiškia viską, ką
-CLIProxyAPI atidavė; prieš CLIProxyAPI atnaujinimą verta paleisti `app:collect --duration=0`.
+CLIProxyAPI atidavė; prieš CLIProxyAPI atnaujinimą verta paleisti `app:collect --duration=0`. CLIProxyAPI
+`upstream.codex.response-steering` (eksperimentinis duplex) turi likti išjungtas: su juo timeline nebeskaido WS
+turn'ų, todėl config.yaml redaktorius jo neleidžia.
 
 ## Įrankių nukreipimas į hub'ą
 
@@ -307,6 +312,10 @@ atskirai (pvz. `rsync -a --ignore-existing` – tik pridedant).
 hybrid-sleep.target`), kaip reikalauja Theo gidas; atšaukti – `systemctl unmask …`.
 
 ## Kai kas nors lūžta
+
+- `usage:lost` – prarasti įrašai yra tik cron log'e (~100 paskutinių paleidimų). Atkurti: atlaisvinus vietą
+  `docker logs cliproxy-prod-cron 2>&1 | grep -o 'usage-record-lost {.*' | sed 's/^usage-record-lost //' >> <spool>/<diena>.jsonl`
+  (`data/prod/cliproxy-traffic/usage/`, diena – UTC), tada `php bin/console app:usage:replay <diena>` (dublikatų nebus).
 
 - Paskyrą išimti iš rotacijos – Paskyros → „Išjungti“ (`disabled: true`, be restart'o).
 - Codex `token_invalidated` (401) – Paskyros → „Prisijungti iš naujo“ (ne šalinti).

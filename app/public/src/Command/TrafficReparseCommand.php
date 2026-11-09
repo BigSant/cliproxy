@@ -27,6 +27,11 @@ class TrafficReparseCommand
     {
         // The traffic lock for the whole run: the collector skips its traffic steps meanwhile (the logs wait in logs/),
         // while usage records and limits go on being collected (CLIProxyAPI's usage queue keeps them only an hour).
+        if (null !== $from && false === \DateTimeImmutable::createFromFormat('!Y-m-d', $from)) {
+            $io->error('--from: YYYY-MM-DD');
+
+            return Command::INVALID;
+        }
         // As much as the collector gets (crontab): an archive expands up to 256 MB and is parsed whole.
         ini_set('memory_limit', '2G');
         $lock = $this->lockFactory->createLock(TrafficIngester::LOCK, ttl: 300);

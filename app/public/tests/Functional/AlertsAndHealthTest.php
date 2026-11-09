@@ -109,6 +109,26 @@ class AlertsAndHealthTest extends WebTestCase
         self::assertSame('https://ntfy.sh/hub-test', file_get_contents('/tmp/cliproxy-test/.ntfy'));
     }
 
+    public function testLostRecordsStayAnErrorUntilMarkedSeen(): void
+    {
+        $settings = self::getContainer()->get(Settings::class);
+        $settings->set(Settings::USAGE_LOST, 500);
+        $collect = static function () {
+            $tester = new \Symfony\Component\Console\Tester\CommandTester((new \Symfony\Bundle\FrameworkBundle\Console\Application(self::$kernel))->find('app:collect'));
+            $tester->execute([]);
+        };
+        $collect();
+        $collect();
+        $alerts = self::getContainer()->get(EntityManagerInterface::class)->getRepository(Alert::class);
+        self::assertSame(Alert::ERROR, $alerts->findOneBy(['alertKey' => 'usage:lost'])?->level, 'still open on a pass that went well');
+
+        $this->browser->loginUser(new InMemoryUser('admin', 'test-password', ['ROLE_ADMIN']));
+        $this->browser->request('GET', '/alerts');
+        $this->browser->submitForm('Prarastus įrašus peržiūrėjau');
+        $collect();
+        self::assertFalse($alerts->findOneBy(['alertKey' => 'usage:lost'])->isOpen());
+    }
+
     public function testAConfigYamlThatBreaksTheDataPolicyIsRefused(): void
     {
         $this->browser->loginUser(new InMemoryUser('admin', 'test-password', ['ROLE_ADMIN']));

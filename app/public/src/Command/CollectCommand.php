@@ -32,6 +32,7 @@ class CollectCommand
 
     /** @var array<string, string> errors of this run, by step */
     private array $errors = [];
+    private ?string $usageOutcome = null;
 
     public function __construct(
         private readonly Collector $collector,
@@ -108,7 +109,13 @@ class CollectCommand
             $step('orphans', $traffic(fn () => $this->traffic->collectOrphans()));
             do {
                 $step('usage', function () use ($io) {
-                    $stored = $this->collector->collectUsage();
+                    try {
+                        $stored = $this->collector->collectUsage();
+                    } catch (\Throwable $exception) {
+                        // What became of the records when it failed, not after a later pass that went well.
+                        $this->usageOutcome = $this->collector->usageOutcome;
+                        throw $exception;
+                    }
                     if ($stored > 0) {
                         $io->writeln(\sprintf('Stored %d usage records.', $stored));
                     }
@@ -187,14 +194,19 @@ class CollectCommand
                 }
             }
         }
-        if ($this->collector->lost > 0) {
-            // This run's loss, pushed as an error (the database may well be back by the alerts step).
-            $conditions['usage:lost'] = ['level' => Alert::ERROR, 'message' => \sprintf('%d usage įrašų neįrašyta nei į spool\'ą, nei į DB – jų kopija tik cron log\'e (eilutės „usage-record-lost“).', $this->collector->lost)];
+        // Lost records are counted for good: the alert stays until they are marked seen (Įspėjimai), even when the
+        // database is back by now.
+        $this->collector->saveLost();
+        $lost = (int) $this->settings->get(Settings::USAGE_LOST);
+        if ($lost > (int) $this->settings->get(Settings::USAGE_LOST_SEEN)) {
+            $conditions['usage:lost'] = ['level' => Alert::ERROR, 'message' => \sprintf('%d usage įrašų neįrašyta nei į spool\'ą, nei į DB. Jų kopija – tik cron log\'e (eilutės „usage-record-lost“, '
+                .'laikomos ~100 paleidimų): atkūrimas README. Eilė neimama, kol spool\'as vėl priims įrašus.', $lost - (int) $this->settings->get(Settings::USAGE_LOST_SEEN))];
         }
         if (isset($this->errors['usage']) && !isset($conditions['cliproxy'])) {
-            $conditions['collector:usage'] = ['level' => Alert::WARNING, 'message' => 'Usage įrašų nepavyko įrašyti: '.$this->errors['usage'].match ($this->collector->usageOutcome) {
+            $conditions['collector:usage'] = ['level' => Alert::WARNING, 'message' => 'Usage įrašų nepavyko įrašyti: '.rtrim($this->errors['usage'], '.').match ($this->usageOutcome) {
                 Collector::IN_SPOOL => ' (jie spool\'e ir bus įrašyti vėliau).',
-                Collector::LEFT_IN_QUEUE => ' Nei spool\'as, nei DB jų nepriima – paliekami CLIProxyAPI eilėje (ji juos laiko valandą).',
+                Collector::LEFT_IN_QUEUE => '. Nei spool\'as, nei DB jų nepriima – paliekami CLIProxyAPI eilėje (ji juos laiko valandą).',
+                Collector::LOST => '. Dalis įrašų prarasta (žr. usage:lost).',
                 default => '.',
             }];
         }

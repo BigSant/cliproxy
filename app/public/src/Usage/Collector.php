@@ -35,6 +35,9 @@ class Collector
     public private(set) ?string $usageOutcome = null;
     /** Records neither the spool nor the database took, over this process. */
     public private(set) int $lost = 0;
+    /** Lost records not counted in the settings yet (the database refused that too). */
+    private int $lostUnsaved = 0;
+    private bool $halted = false;
 
     public function __construct(
         private readonly ManagementClient $client,
@@ -73,11 +76,16 @@ class Collector
         $done = $failed = [];
         do {
             // Taken records need one place at least: with neither the spool nor the database able to take them they
-            // stay in CLIProxyAPI's queue (it keeps them an hour) instead of being taken into nowhere.
-            if (!$this->spool->writable() && !$this->databaseWritable()) {
-                $this->usageOutcome = self::LEFT_IN_QUEUE;
-                $failure ??= new \RuntimeException('Neither the usage spool nor the database can take records');
-                break;
+            // stay in CLIProxyAPI's queue (it keeps them an hour) instead of being taken into nowhere. Once a batch was
+            // lost (a database that passed the probe and then refused the rows), only the spool resumes the taking.
+            if (!$this->spool->writable()) {
+                if ($this->takingHalted() || !$this->databaseWritable()) {
+                    $this->usageOutcome = self::LEFT_IN_QUEUE;
+                    $failure ??= new \RuntimeException('Neither the usage spool nor the database can take records');
+                    break;
+                }
+            } else {
+                $this->resumeTaking();
             }
             $records = array_map(UsageRecord::sanitize(...), $this->client->takeUsage(self::BATCH));
             // (store() sanitizes again: idempotent, and replays of older spool lines need it.)
@@ -85,12 +93,21 @@ class Collector
                 break;
             }
             $day = null;
+            $today = $this->spool->dayOf($this->clock->now());
+            $wasPending = \in_array($today, $this->spool->pendingDays(), true);
             try {
                 // The mark first: a crash right after the append still leaves the day to replay.
-                $this->spool->markPending($this->spool->dayOf($this->clock->now()));
+                $this->spool->markPending($today);
                 $day = $this->spool->append($records, $this->clock->now());
             } catch (\Throwable $exception) {
                 $failure ??= new \RuntimeException('Usage spool not written ('.$exception->getMessage().'): the records go to the database only', 0, $exception);
+                // Nothing of this batch is in the spool: the day waits for nothing new.
+                if (!$wasPending) {
+                    try {
+                        $this->spool->unmarkPending($today);
+                    } catch (\Throwable) {
+                    }
+                }
             }
             if (null !== $day && $failure instanceof \Doctrine\DBAL\Exception) {
                 // The database is still away: the batch waits in the spool.
@@ -111,9 +128,17 @@ class Collector
                     continue;
                 }
                 // Neither the spool nor the database took this batch: it is lost but for this copy on stderr (cron's
-                // log), and no further batch is taken.
+                // log), and no further batch is taken until the spool takes them again.
                 $this->usageOutcome = self::LOST;
                 $this->lost += \count($records);
+                $this->lostUnsaved += \count($records);
+                $this->halted = true;
+                try {
+                    $this->settings->set(Settings::USAGE_TAKING_HALTED, $this->clock->now()->format(\DATE_ATOM));
+                    $this->saveLost();
+                } catch (\Throwable) {
+                    $this->doctrine->resetManager();
+                }
                 foreach ($records as $record) {
                     fwrite(\STDERR, 'usage-record-lost '.json_encode($record, \JSON_UNESCAPED_UNICODE | \JSON_UNESCAPED_SLASHES | \JSON_INVALID_UTF8_SUBSTITUTE)."\n");
                 }
@@ -134,7 +159,6 @@ class Collector
         return $stored;
     }
 
-    /** @return int the records of the day the database did not have yet */
     /** A write, not a read: a database that answers but cannot write (read-only, full) is no place for records. */
     private function databaseWritable(): bool
     {
@@ -151,6 +175,41 @@ class Collector
         }
     }
 
+    /** Adds the lost records not counted yet to the count kept for the alert (Settings::USAGE_LOST). */
+    public function saveLost(): void
+    {
+        if (0 < $this->lostUnsaved) {
+            $this->settings->set(Settings::USAGE_LOST, (int) $this->settings->get(Settings::USAGE_LOST) + $this->lostUnsaved);
+            $this->lostUnsaved = 0;
+        }
+    }
+
+    /** Whether a batch was lost since the spool last took records (this process, or one before it). */
+    private function takingHalted(): bool
+    {
+        try {
+            return $this->halted || '' !== (string) $this->settings->get(Settings::USAGE_TAKING_HALTED);
+        } catch (\Throwable) {
+            $this->doctrine->resetManager();
+
+            return true;
+        }
+    }
+
+    private function resumeTaking(): void
+    {
+        try {
+            if ($this->halted || '' !== (string) $this->settings->get(Settings::USAGE_TAKING_HALTED)) {
+                $this->settings->set(Settings::USAGE_TAKING_HALTED, '');
+            }
+            $this->halted = false;
+        } catch (\Throwable) {
+            // The database away: the spool takes the records meanwhile, the mark goes next time.
+            $this->doctrine->resetManager();
+        }
+    }
+
+    /** @return int the records of the day the database did not have yet */
     public function replay(string $day): int
     {
         $stored = 0;

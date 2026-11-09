@@ -270,6 +270,37 @@ class CollectorTest extends KernelTestCase
         self::assertSame(0, $collector->lost);
     }
 
+    public function testAfterALostBatchTheQueueWaitsForTheSpool(): void
+    {
+        $this->cliProxy->queue = array_map(static fn (int $i) => ['timestamp' => '2026-11-09T12:00:00Z', 'request_id' => "req-$i", 'provider' => 'claude'], range(1, 1200));
+        $connection = $this->entityManager->getConnection();
+        @mkdir('/tmp/cliproxy-test/usage', 0o777, true);
+        chmod('/tmp/cliproxy-test/usage', 0o500);
+        // A full disk: the probes pass (they need no new room), the rows do not.
+        $connection->executeStatement("CREATE TRIGGER full_disk BEFORE INSERT ON usage_record BEGIN SELECT RAISE(ABORT, 'disk full'); END");
+        $collector = self::getContainer()->get(Collector::class);
+        try {
+            foreach ([1, 2, 3] as $pass) {
+                try {
+                    $collector->collectUsage();
+                } catch (\Exception) {
+                }
+            }
+        } finally {
+            $connection->executeStatement('DROP TRIGGER full_disk');
+            chmod('/tmp/cliproxy-test/usage', 0o700);
+        }
+        self::assertCount(700, $this->cliProxy->queue, 'one batch lost, then the taking stops');
+        self::assertSame(500, $collector->lost);
+        $settings = self::getContainer()->get(Settings::class);
+        self::assertSame(500, $settings->get(Settings::USAGE_LOST));
+        self::assertNotSame('', $settings->get(Settings::USAGE_TAKING_HALTED));
+
+        // The spool back: the taking goes on, and the halt is lifted.
+        self::assertSame(700, $collector->collectUsage());
+        self::assertSame('', $settings->get(Settings::USAGE_TAKING_HALTED));
+    }
+
     public function testALineACrashCutShortStaysOnItsOwnAndIsReported(): void
     {
         $spool = self::getContainer()->get(UsageSpool::class);

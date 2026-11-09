@@ -129,6 +129,7 @@ class UsageRecord
             $occurredAt = new \DateTimeImmutable();
         }
         $provider = (string) ($record['provider'] ?? '');
+        $cacheRead = (int) ($tokens['cache_read_tokens'] ?? $tokens['cached_tokens'] ?? 0);
 
         $usage = new self(
             occurredAt: $occurredAt,
@@ -139,10 +140,10 @@ class UsageRecord
             sessionId: substr((string) ($record['session_id'] ?? ''), 0, 64),
             clientKey: substr((string) ($record['api_key'] ?? ''), -4),
             endpoint: substr((string) ($record['endpoint'] ?? ''), 0, 64),
-            inputTokens: (int) ($tokens['input_tokens'] ?? 0),
+            inputTokens: self::uncachedInput($record, $tokens, $provider, $cacheRead),
             outputTokens: (int) ($tokens['output_tokens'] ?? 0),
             reasoningTokens: (int) ($tokens['reasoning_tokens'] ?? 0),
-            cacheReadTokens: (int) ($tokens['cache_read_tokens'] ?? $tokens['cached_tokens'] ?? 0),
+            cacheReadTokens: $cacheRead,
             cacheCreationTokens: (int) ($tokens['cache_creation_tokens'] ?? 0),
             totalTokens: (int) ($tokens['total_tokens'] ?? 0),
             latencyMs: (int) ($record['latency_ms'] ?? 0),
@@ -164,6 +165,25 @@ class UsageRecord
         $usage->occurredMicros = (int) $occurredAt->format('u');
 
         return $usage;
+    }
+
+    /**
+     * The input not read from the cache, as Claude counts it: OpenAI's (Codex's) input_tokens include the cached ones,
+     * so input, cache reads and cache writes add up the same way for every provider. CLIProxyAPI's token_breakdown
+     * says it directly; older records without it are worked out.
+     *
+     * @param array<string, mixed> $record
+     * @param array<string, mixed> $tokens
+     */
+    private static function uncachedInput(array $record, array $tokens, string $provider, int $cacheRead): int
+    {
+        $uncached = $record['token_breakdown']['input']['uncached_tokens'] ?? null;
+        if (\is_int($uncached) && $uncached >= 0) {
+            return $uncached;
+        }
+        $input = (int) ($tokens['input_tokens'] ?? 0);
+
+        return \in_array($provider, ['codex', 'openai'], true) ? max(0, $input - $cacheRead) : $input;
     }
 
     /** Response headers worth keeping: limits, retries and request ids; not cookies or organisation ids. */
