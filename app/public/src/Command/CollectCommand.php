@@ -207,6 +207,7 @@ class CollectCommand
                 Collector::IN_SPOOL => ' (jie spool\'e ir bus įrašyti vėliau).',
                 Collector::LEFT_IN_QUEUE => '. Nei spool\'as, nei DB jų nepriima – paliekami CLIProxyAPI eilėje (ji juos laiko valandą).',
                 Collector::LOST => '. Dalis įrašų prarasta (žr. usage:lost).',
+                Collector::HALTED => '. Po prarastų įrašų eilė neimama, kol spool\'as vėl priims įrašus (CLIProxyAPI juos laiko valandą).',
                 default => '.',
             }];
         }

@@ -313,9 +313,13 @@ hybrid-sleep.target`), kaip reikalauja Theo gidas; atšaukti – `systemctl unma
 
 ## Kai kas nors lūžta
 
-- `usage:lost` – prarasti įrašai yra tik cron log'e (~100 paskutinių paleidimų). Atkurti: atlaisvinus vietą
-  `docker logs cliproxy-prod-cron 2>&1 | grep -o 'usage-record-lost {.*' | sed 's/^usage-record-lost //' >> <spool>/<diena>.jsonl`
-  (`data/prod/cliproxy-traffic/usage/`, diena – UTC), tada `php bin/console app:usage:replay <diena>` (dublikatų nebus).
+- `usage:lost` – prarasti įrašai yra tik cron paleidimų log'uose (~100 paskutinių paleidimų; `docker logs` jų netinka –
+  ten kabutės ekranuotos). Atkurti, atlaisvinus vietą:
+  `grep -ho 'usage-record-lost {.*' ~/Projects/runtime/cliproxy/prod/data/prod/cron/runs/*/*.log | sed 's/^usage-record-lost //' >> ~/Projects/runtime/cliproxy/prod/data/prod/cliproxy-traffic/usage/<diena>.jsonl`
+  (diena – UTC, failas 0600), tada `php bin/console app:usage:replay <diena>` (dublikatų nebus). Eilė vėl imama pati,
+  kai spool'as priima įrašą.
+- Duomenų migracijos (pvz. `Version20261109190000`, Codex tokenai be cache) negrįžtamos: grąžinus seną kodą, nauji ir
+  seni įrašai skaičiuotų skirtingai – geriau taisyti į priekį.
 
 - Paskyrą išimti iš rotacijos – Paskyros → „Išjungti“ (`disabled: true`, be restart'o).
 - Codex `token_invalidated` (401) – Paskyros → „Prisijungti iš naujo“ (ne šalinti).

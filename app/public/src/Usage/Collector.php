@@ -30,6 +30,7 @@ class Collector
     public const string IN_SPOOL = 'spool';
     public const string LEFT_IN_QUEUE = 'queue';
     public const string LOST = 'lost';
+    public const string HALTED = 'halted';
 
     private bool $limitsChanged = false;
     public private(set) ?string $usageOutcome = null;
@@ -78,14 +79,24 @@ class Collector
             // Taken records need one place at least: with neither the spool nor the database able to take them they
             // stay in CLIProxyAPI's queue (it keeps them an hour) instead of being taken into nowhere. Once a batch was
             // lost (a database that passed the probe and then refused the rows), only the spool resumes the taking.
-            if (!$this->spool->writable()) {
-                if ($this->takingHalted() || !$this->databaseWritable()) {
+            $halted = $this->takingHalted();
+            // After a loss only a spool that really appends again resumes the taking: an empty line (replay skips it)
+            // written to the day's file.
+            if ($halted && $this->spool->writable() && $this->spool->canAppend($this->spool->dayOf($this->clock->now()))) {
+                $this->resumeTaking();
+                $halted = false;
+            }
+            if ($halted || !$this->spool->writable()) {
+                if ($halted) {
+                    $this->usageOutcome = self::HALTED;
+                    $failure ??= new \RuntimeException('Usage records were lost; the queue waits until the spool takes records again');
+                    break;
+                }
+                if (!$this->databaseWritable()) {
                     $this->usageOutcome = self::LEFT_IN_QUEUE;
                     $failure ??= new \RuntimeException('Neither the usage spool nor the database can take records');
                     break;
                 }
-            } else {
-                $this->resumeTaking();
             }
             $records = array_map(UsageRecord::sanitize(...), $this->client->takeUsage(self::BATCH));
             // (store() sanitizes again: idempotent, and replays of older spool lines need it.)
@@ -127,21 +138,7 @@ class Collector
                     $this->usageOutcome ??= self::IN_SPOOL;
                     continue;
                 }
-                // Neither the spool nor the database took this batch: it is lost but for this copy on stderr (cron's
-                // log), and no further batch is taken until the spool takes them again.
-                $this->usageOutcome = self::LOST;
-                $this->lost += \count($records);
-                $this->lostUnsaved += \count($records);
-                $this->halted = true;
-                try {
-                    $this->settings->set(Settings::USAGE_TAKING_HALTED, $this->clock->now()->format(\DATE_ATOM));
-                    $this->saveLost();
-                } catch (\Throwable) {
-                    $this->doctrine->resetManager();
-                }
-                foreach ($records as $record) {
-                    fwrite(\STDERR, 'usage-record-lost '.json_encode($record, \JSON_UNESCAPED_UNICODE | \JSON_UNESCAPED_SLASHES | \JSON_INVALID_UTF8_SUBSTITUTE)."\n");
-                }
+                $this->loseBatch($records);
                 break;
             }
         } while (\count($records) === self::BATCH);
@@ -172,6 +169,29 @@ class Collector
             $this->doctrine->resetManager();
 
             return false;
+        }
+    }
+
+    /**
+     * Neither the spool nor the database took this batch: it is lost but for this copy on stderr (cron's run log), and
+     * no further batch is taken until the spool takes them again.
+     *
+     * @param list<array<string, mixed>> $records
+     */
+    private function loseBatch(array $records): void
+    {
+        $this->usageOutcome = self::LOST;
+        $this->lost += \count($records);
+        $this->lostUnsaved += \count($records);
+        $this->halted = true;
+        foreach ($records as $record) {
+            fwrite(\STDERR, 'usage-record-lost '.json_encode($record, \JSON_UNESCAPED_UNICODE | \JSON_UNESCAPED_SLASHES | \JSON_INVALID_UTF8_SUBSTITUTE)."\n");
+        }
+        try {
+            $this->settings->set(Settings::USAGE_TAKING_HALTED, $this->clock->now()->format(\DATE_ATOM));
+            $this->saveLost();
+        } catch (\Throwable) {
+            $this->doctrine->resetManager();
         }
     }
 

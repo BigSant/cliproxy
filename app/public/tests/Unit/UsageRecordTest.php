@@ -32,6 +32,9 @@ class UsageRecordTest extends TestCase
         // CLIProxyAPI's own breakdown when it has one.
         $codex['token_breakdown'] = ['schema_version' => 2, 'input' => ['total_tokens' => 5000, 'uncached_tokens' => 990, 'cache_read_tokens' => 4010]];
         self::assertSame(990, UsageRecord::fromQueueRecord($codex)->inputTokens);
+        // One CLIProxyAPI could not complete has its parts at 0: worked out instead.
+        $codex['token_breakdown'] = ['quality' => 'inconsistent', 'input' => ['uncached_tokens' => 0]];
+        self::assertSame(1000, UsageRecord::fromQueueRecord($codex)->inputTokens);
 
         $claude = ['timestamp' => '2026-11-09T12:00:00Z', 'provider' => 'claude', 'tokens' => ['input_tokens' => 10, 'cache_read_tokens' => 4000]];
         self::assertSame(10, UsageRecord::fromQueueRecord($claude)->inputTokens);

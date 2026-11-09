@@ -296,7 +296,20 @@ class CollectorTest extends KernelTestCase
         self::assertSame(500, $settings->get(Settings::USAGE_LOST));
         self::assertNotSame('', $settings->get(Settings::USAGE_TAKING_HALTED));
 
+        // The directory writable but the day's file not: still halted.
+        chmod('/tmp/cliproxy-test/usage', 0o700);
+        $day = self::getContainer()->get(UsageSpool::class)->dayOf(new \DateTimeImmutable());
+        touch("/tmp/cliproxy-test/usage/$day.jsonl");
+        chmod("/tmp/cliproxy-test/usage/$day.jsonl", 0o400);
+        try {
+            $collector->collectUsage();
+        } catch (\Exception) {
+        }
+        self::assertCount(700, $this->cliProxy->queue);
+        self::assertSame(Collector::HALTED, $collector->usageOutcome);
+
         // The spool back: the taking goes on, and the halt is lifted.
+        chmod("/tmp/cliproxy-test/usage/$day.jsonl", 0o600);
         self::assertSame(700, $collector->collectUsage());
         self::assertSame('', $settings->get(Settings::USAGE_TAKING_HALTED));
     }

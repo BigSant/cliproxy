@@ -178,7 +178,8 @@ class UsageRecord
     private static function uncachedInput(array $record, array $tokens, string $provider, int $cacheRead): int
     {
         $uncached = $record['token_breakdown']['input']['uncached_tokens'] ?? null;
-        if (\is_int($uncached) && $uncached >= 0) {
+        // Only a breakdown CLIProxyAPI could complete; an inconsistent one leaves the parts at 0.
+        if (\is_int($uncached) && $uncached >= 0 && 'complete' === ($record['token_breakdown']['quality'] ?? 'complete')) {
             return $uncached;
         }
         $input = (int) ($tokens['input_tokens'] ?? 0);
