@@ -239,6 +239,11 @@ class TrafficIngester
     /** @return list<Exchange> */
     private function record(string $name, RequestLog $log, int $writtenAt, string $archived): array
     {
+        // A client checking the hub is there (Claude Code: HEAD /api/hello, 404 from CLIProxyAPI) is no traffic: the
+        // file is archived like any other, the journal does not list it.
+        if (self::isProbe($log)) {
+            return [];
+        }
         $entityManager = $this->doctrine->getManager();
         $exchanges = [];
         $timeline = $log->sections['WEBSOCKET TIMELINE'][0] ?? null;
@@ -278,6 +283,11 @@ class TrafficIngester
         }
 
         return $exchanges;
+    }
+
+    private static function isProbe(RequestLog $log): bool
+    {
+        return \in_array(strtoupper($log->info['Method'] ?? ''), ['HEAD', 'OPTIONS'], true) || '/api/hello' === $log->path();
     }
 
     /** A reparsed exchange that was linked gets its usage record's additions back (the log alone lacks them). */
@@ -436,6 +446,7 @@ class TrafficIngester
     {
         $exchange->provider = mb_substr($exchange->provider, 0, 32);
         $exchange->model = mb_substr($turn->model, 0, 128);
+        $exchange->reasoningEffort = mb_substr($turn->effort, 0, 32);
         $exchange->sessionId = mb_substr($turn->sessionId, 0, 64);
         $exchange->stream = $turn->stream;
         // A kind the usage record told (subagent, compaction, fork) outlives a reparse.
@@ -577,6 +588,10 @@ class TrafficIngester
         $exchange->account = $usage->account;
         if ('' === $exchange->sessionId) {
             $exchange->sessionId = $usage->sessionId;
+        }
+        // CLIProxyAPI's reading of the effort, when the log's request did not say it.
+        if ('' === $exchange->reasoningEffort) {
+            $exchange->reasoningEffort = $usage->reasoningEffort;
         }
         if (Turn::KIND_SIDE !== $exchange->kind) {
             $exchange->kind = match (true) {

@@ -205,6 +205,7 @@ table.traffic .excerpt { max-width: 560px; overflow-wrap: anywhere; }
 .kind { font-size: .72rem; padding: .05rem .4rem; border-radius: 5px; background: var(--surface-3); color: var(--muted); }
 .kind-user { background: color-mix(in srgb, var(--accent) 22%, transparent); color: var(--accent); }
 .kind-think { background: color-mix(in srgb, var(--info) 20%, transparent); color: var(--info); }
+.kind-effort { margin-left: .3rem; white-space: nowrap; }
 
 /* Accounts */
 .account-cell { display: flex; gap: .7rem; align-items: center; }

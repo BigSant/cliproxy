@@ -16,8 +16,9 @@ final class RequestLogs
         return "=== REQUEST INFO ===\nVersion: v8.0.61\nURL: $url\nMethod: POST\nDownstream Transport: http\nUpstream Transport: http\nTimestamp: $at\n\n\n"
             ."=== HEADERS ===\n$headerLines\n\n"
             .'=== REQUEST BODY ==='."\n".json_encode($request, \JSON_UNESCAPED_SLASHES)."\n\n\n"
-            ."=== API REQUEST ===\nTimestamp: $at\n{\"upstream\":true}\n\n\n"
-            ."=== API RESPONSE ===\nTimestamp: $at\n(upstream bytes)\n\n\n"
+            // v8 numbers each attempt's sections.
+            ."=== API REQUEST 1 ===\nTimestamp: $at\n{\"upstream\":true}\n\n\n"
+            ."=== API RESPONSE 1 ===\nTimestamp: $at\n(upstream bytes)\n\n\n"
             ."=== RESPONSE ===\nStatus: $status\nContent-Type: text/event-stream\n\n".$response."\n";
     }
 
@@ -43,7 +44,7 @@ final class RequestLogs
         }
 
         return self::file('/v1/messages?beta=true', [
-            'model' => 'claude-fable-5-1', 'stream' => true, 'max_tokens' => 32000,
+            'model' => 'claude-fable-5-1', 'stream' => true, 'max_tokens' => 32000, 'output_config' => ['effort' => 'xhigh'],
             'metadata' => ['user_id' => 'user_abc_account_def_session_11111111-2222-3333-4444-555555555555'],
             'system' => [['type' => 'text', 'text' => 'You are Claude Code.']],
             'tools' => [['name' => 'Bash'], ['name' => 'Read']],

@@ -20,9 +20,13 @@ final class Turn
     public const string KIND_SIDE = 'side';
 
     /** Blocks the clients add to a person's message on their own: reminders, environment, instructions. */
-    private const string INJECTED = '/<(system-reminder|environment_context|user_instructions|ide_selection|ide_opened_file)\b[^>]*>.*?<\/\1>/s';
+    private const string INJECTED = '/<(system-reminder|environment_context|user_instructions|ide_selection|ide_opened_file)\b[^>]*>.*?<\/\1>'
+        // Codex puts AGENTS.md before the first prompt of a session.
+        .'|^# AGENTS\.md instructions[^\n]*\n+<INSTRUCTIONS>.*?<\/INSTRUCTIONS>/sm';
 
     public string $model = '';
+    /** The reasoning effort the client asked for (Claude output_config.effort, OpenAI reasoning.effort). */
+    public string $effort = '';
     public bool $stream = false;
     public string $prompt = '';
     public string $promptKind = self::PROMPT_NONE;

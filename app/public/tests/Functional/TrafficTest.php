@@ -60,6 +60,7 @@ class TrafficTest extends WebTestCase
         $first = $this->entityManager->getRepository(Exchange::class)->findOneBy(['requestTail' => 'aaaa1111']);
         self::assertSame('claude', $first->provider);
         self::assertSame('claude-fable-5-1', $first->model);
+        self::assertSame('xhigh', $first->reasoningEffort);
         self::assertSame('user', $first->promptKind);
         self::assertSame('Paleisk testus', $first->prompt);
         self::assertSame('Reikia paleisti testus.', $first->thinking);
@@ -375,6 +376,18 @@ class TrafficTest extends WebTestCase
         self::getContainer()->get(TrafficIngester::class)->ingest();
 
         self::assertSame('Sutvarkyk testus', $this->entityManager->getRepository(Exchange::class)->findOneBy([])->prompt);
+        self::assertSame('Paleisk', \App\Traffic\Turn::cleanPrompt("# AGENTS.md instructions for /home/x\n\n<INSTRUCTIONS>\n# Taisyklės\n</INSTRUCTIONS>\n\nPaleisk"), 'Codex\'s AGENTS.md');
+    }
+
+    public function testAClientProbeIsArchivedButNotInTheJournal(): void
+    {
+        $this->write('error-api-hello-2026-11-09T150000-1.log', "=== REQUEST INFO ===\nVersion: v8.0.61\nURL: /api/hello\nMethod: HEAD\nTimestamp: 2026-11-09T15:00:00+02:00\n\n\n"
+            ."=== HEADERS ===\nUser-Agent: Bun/1.4.4\n\n\n=== REQUEST BODY ===\n\n\n=== RESPONSE ===\nStatus: 404\n\n");
+
+        self::getContainer()->get(TrafficIngester::class)->ingest();
+
+        self::assertSame(0, $this->entityManager->getRepository(Exchange::class)->count([]));
+        self::assertCount(1, self::getContainer()->get(TrafficIngester::class)->archived());
     }
 
     public function testAFailedRequestKeepsItsError(): void

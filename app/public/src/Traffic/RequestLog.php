@@ -38,7 +38,9 @@ final readonly class RequestLog
         $response = false === $responseAt ? '' : substr($text, $responseAt + \strlen("\n=== RESPONSE ===\n"));
 
         $sections = [];
-        $parts = preg_split('/^=== ([A-Z][A-Z ]*[A-Z]) ===$\n?/m', $head, -1, \PREG_SPLIT_DELIM_CAPTURE) ?: [];
+        // CLIProxyAPI v8 numbers the attempts' sections (API REQUEST 1, API RESPONSE 2, …): they gather under one name,
+        // in order.
+        $parts = preg_split('/^=== ([A-Z][A-Z ]*[A-Z])(?: \d+)? ===$\n?/m', $head, -1, \PREG_SPLIT_DELIM_CAPTURE) ?: [];
         for ($i = 1; $i + 1 < \count($parts); $i += 2) {
             $sections[$parts[$i]][] = rtrim($parts[$i + 1], "\n");
         }

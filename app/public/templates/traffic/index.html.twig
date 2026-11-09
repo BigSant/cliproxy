@@ -47,7 +47,7 @@
                         <tr class="row-link {{ exchange.failed ? 'is-failed' }}" data-href="{{ path('app_traffic_show', {id: exchange.id}) }}">
                             <td class="nowrap"><a href="{{ path('app_traffic_show', {id: exchange.id}) }}">{{ exchange.occurredAt|date('m-d H:i:s') }}</a></td>
                             <td>
-                                <span class="provider provider-{{ exchange.provider }}">{{ exchange.model ?: exchange.endpoint }}</span>
+                                <span class="provider provider-{{ exchange.provider }}">{{ exchange.model ?: exchange.endpoint }}</span>{% if exchange.reasoningEffort %} <span class="kind kind-effort" title="Reasoning effort">{{ exchange.reasoningEffort }}</span>{% endif %}
                                 <div class="muted small email">{{ exchange.account ?: '–' }}</div>
                             </td>
                             <td class="excerpt">

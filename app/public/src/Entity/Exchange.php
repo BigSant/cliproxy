@@ -44,6 +44,9 @@ class Exchange
     public string $provider = '';
     #[ORM\Column(length: 128)]
     public string $model = '';
+    /** The reasoning effort asked for: low, medium, high, xhigh, max…; '' when the request named none. */
+    #[ORM\Column(length: 32, options: ['default' => ''])]
+    public string $reasoningEffort = '';
     #[ORM\Column(length: 64)]
     public string $client = '';
     #[ORM\Column(length: 64)]
