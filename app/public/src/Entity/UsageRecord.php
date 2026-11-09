@@ -62,6 +62,12 @@ class UsageRecord
         /** The last eight characters of the request id, which the request log's file name ends with too. */
         #[ORM\Column(length: 8, options: ['default' => ''])]
         public readonly string $requestTail = '',
+        /** Of cacheCreationTokens: written for 5 minutes and for one hour (Claude). Claude Code through a proxy may
+         * fall back to 5 minutes, which rewrites the cache after every longer pause (README, "Prompt cache TTL"). */
+        #[ORM\Column(options: ['default' => 0])]
+        public readonly int $cacheCreation5mTokens = 0,
+        #[ORM\Column(options: ['default' => 0])]
+        public readonly int $cacheCreation1hTokens = 0,
     ) {
     }
 
@@ -106,6 +112,8 @@ class UsageRecord
             failed: (bool) ($record['failed'] ?? false),
             statusCode: (int) ($fail['status_code'] ?? 0),
             requestTail: substr(trim((string) ($record['request_id'] ?? '')), -8),
+            cacheCreation5mTokens: (int) ($tokens['cache_creation_5m_tokens'] ?? 0),
+            cacheCreation1hTokens: (int) ($tokens['cache_creation_1h_tokens'] ?? 0),
         );
     }
 }

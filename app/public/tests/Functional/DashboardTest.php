@@ -82,6 +82,22 @@ class DashboardTest extends WebTestCase
         self::assertSame(1, self::getContainer()->get(EntityManagerInterface::class)->getRepository(UsageRecord::class)->count([]));
     }
 
+    public function testFiveMinuteCacheWritesAreFlaggedAndTheFixIsOnTheConnectPage(): void
+    {
+        $this->cliProxy->queue = [['timestamp' => (new \DateTimeImmutable())->format(\DATE_ATOM), 'provider' => 'claude',
+            'tokens' => ['cache_creation_tokens' => 1000, 'cache_creation_5m_tokens' => 900, 'cache_creation_1h_tokens' => 100]]];
+        self::getContainer()->get(Collector::class)->collectUsage();
+        $this->logIn();
+
+        $this->browser->request('GET', '/');
+        self::assertSelectorTextContains('.stats .stat-warn', 'promptCacheTtl');
+        self::assertSelectorTextContains('.stats', '10,0 %');
+
+        $this->browser->request('GET', '/connect');
+        self::assertSelectorTextContains('pre.code', '"promptCacheTtl": "1h"');
+        self::assertAnySelectorTextContains('.note-box', 'requires_openai_auth = true');
+    }
+
     public function testAnAccountIsSignedInByPastingTheRedirect(): void
     {
         $this->logIn();

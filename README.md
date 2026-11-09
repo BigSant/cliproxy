@@ -127,7 +127,7 @@ Skydelio „Prijungimas“ puslapis duoda tikslius fragmentus. Trumpai:
 
 ```json
 // ~/.claude/settings.json
-{ "env": { "ANTHROPIC_BASE_URL": "http://127.0.0.1:8317", "ANTHROPIC_AUTH_TOKEN": "<raktas>" } }
+{ "env": { "ANTHROPIC_BASE_URL": "http://127.0.0.1:8317", "ANTHROPIC_AUTH_TOKEN": "<raktas>" }, "promptCacheTtl": "1h" }
 ```
 
 ```toml
@@ -144,6 +144,18 @@ experimental_bearer_token = "<raktas>"
 
 Nekeičiant įprastų nustatymų – `CLAUDE_CONFIG_DIR=~/.claude-hub claude`, `CODEX_HOME=~/.codex-hub codex`.
 T3 Code naudoja aplinkos kompiuterio CLI nustatymus; Codex – „Use existing CLI“.
+
+### Prompt cache TTL
+
+Gist'o komentarų (EtanHey, mmmattG) pastaba: su savu `ANTHROPIC_BASE_URL` ir token'u Claude Code (pastebėta 2.1.312)
+prompt cache rašo **5 min.**, ne 1 val., kaip prenumeratos prisijungime. Po kiekvienos ilgesnės nei 5 min. pauzės
+cache rašomas iš naujo, todėl 5 val. ir savaitės limitai tirpsta greičiau. Todėl kiekvieno kliento
+`~/.claude/settings.json` turi `"promptCacheTtl": "1h"` (subagentams – atskiras `subagentPromptCacheTtl`). Ar tai
+veikia, rodo Apžvalgos ir Naudojimo kortelė „Cache rašymai 1 val. / 5 min.“: CLIProxyAPI usage įrašai skiria
+`cache_creation_5m_tokens` ir `cache_creation_1h_tokens`; vyraujant 5 min. kortelė pažymima.
+
+T3 Code dvigubiems usage įrašams (mmmattG): `requires_openai_auth = true` po `[model_providers.cliproxy]`, jei
+kompiuteryje yra ChatGPT prisijungimas ta pačia hub'o paskyra. Nepatikrinta.
 
 ## Paleidimas iš švaraus clone'o (local)
 

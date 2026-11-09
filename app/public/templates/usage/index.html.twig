@@ -17,6 +17,7 @@
         <div class="stat"><div class="stat-label">Tokenai</div><div class="stat-value">{{ totals.total|tokens }}</div><div class="stat-sub">įvestis {{ totals.input|tokens }} · išvestis {{ totals.output|tokens }}</div></div>
         <div class="stat"><div class="stat-label">Cache skaitymai</div><div class="stat-value">{{ totals.cache_read|tokens }}</div><div class="stat-sub">{{ totals.cache_read|share(totals.cache_read + totals.cache_creation + totals.input) }} visos įvesties</div></div>
         <div class="stat {{ totals.cache_creation > totals.cache_read ? 'stat-warn' }}"><div class="stat-label">Cache rašymai</div><div class="stat-value">{{ totals.cache_creation|tokens }}</div><div class="stat-sub">{{ totals.cache_creation > totals.cache_read ? 'rašoma daugiau nei skaitoma – tikrink affinity' : 'santykis tvarkingas' }}</div></div>
+        {% include '_parts/cache_ttl_stat.html.twig' %}
     </section>
 
     <section class="card">
