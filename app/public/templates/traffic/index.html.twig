@@ -24,7 +24,7 @@
         </select>
         <select name="outcome">
             <option value="">Visos užklausos</option>
-            {% for key, label in {prompt: 'Tik žmogaus prompt\'ai', failed: 'Nepavykusios', tool_error: 'Su įrankių klaidomis', thinking: 'Su mąstymu'} %}<option value="{{ key }}" {{ filters.outcome == key ? 'selected' }}>{{ label }}</option>{% endfor %}
+            {% for key, label in {prompt: 'Tik žmogaus prompt\'ai', agent: 'Agentų prompt\'ai', failed: 'Nepavykusios', tool_error: 'Su įrankių klaidomis', thinking: 'Su mąstymu'} %}<option value="{{ key }}" {{ filters.outcome == key ? 'selected' }}>{{ label }}</option>{% endfor %}
         </select>
         <select name="kind">
             <option value="">Visi tipai</option>
@@ -53,6 +53,7 @@
                             <td class="excerpt">
                                 {% if exchange.kind != 'main' %}<span class="kind">{{ {subagent: 'subagentas', compaction: 'compaction', fork: 'fork', side: 'šalutinė'}[exchange.kind] ?? exchange.kind }}</span> {% endif %}
                                 {% if exchange.promptKind == 'user' %}<span class="kind kind-user">žmogus</span> {{ exchange.prompt|u.truncate(140, '…') }}
+                                {% elseif exchange.promptKind == 'agent' %}<span class="kind kind-agent" title="Parašė agentas: deleguota užduotis, jos rezultatas ar foninis pranešimas">agentas</span> {{ exchange.prompt|u.truncate(140, '…') }}
                                 {% elseif exchange.promptKind == 'tool_results' %}<span class="kind">rezultatai{% if exchange.toolErrorCount %} · <span class="bad">{{ exchange.toolErrorCount }} klaid.</span>{% endif %}</span>
                                 {% else %}<span class="kind">–</span>{% endif %}
                                 <div class="muted small">{% if exchange.hasThinking %}<span class="kind kind-think">mąstė</span> {% endif %}{{ (exchange.answer ?: exchange.error)|u.truncate(140, '…') }}</div>

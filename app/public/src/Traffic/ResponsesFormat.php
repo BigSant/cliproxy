@@ -121,7 +121,7 @@ final class ResponsesFormat
             }
         }
         $turn->prompt = Turn::cleanPrompt(implode("\n", array_filter($texts, 'strlen')));
-        $turn->promptKind = [] !== $turn->toolResults ? Turn::PROMPT_TOOL_RESULTS : ('' !== $turn->prompt ? Turn::PROMPT_USER : Turn::PROMPT_NONE);
+        $turn->promptKind = [] !== $turn->toolResults ? Turn::PROMPT_TOOL_RESULTS : Turn::promptKindOf($turn->prompt);
     }
 
     /** true/false from an exit code in the output ({"metadata":{"exit_code":1}}, "Exit code: 1"); null when none. */

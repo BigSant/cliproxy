@@ -10,7 +10,7 @@ use Doctrine\Persistence\ManagerRegistry;
 /** @extends ServiceEntityRepository<Exchange> */
 class ExchangeRepository extends ServiceEntityRepository
 {
-    public const array OUTCOMES = ['failed', 'tool_error', 'thinking', 'prompt'];
+    public const array OUTCOMES = ['failed', 'tool_error', 'thinking', 'prompt', 'agent'];
     public const array KINDS = ['main', 'subagent', 'compaction', 'fork', 'side'];
     /** The list shows the start of each text; the full text is on the exchange's own page. */
     private const int EXCERPT = 400;
@@ -202,6 +202,7 @@ class ExchangeRepository extends ServiceEntityRepository
             'tool_error' => $query->andWhere('e.toolErrorCount > 0'),
             'thinking' => $query->andWhere('e.hasThinking = true'),
             'prompt' => $query->andWhere("e.promptKind = 'user'")->andWhere("e.kind = 'main'"),
+            'agent' => $query->andWhere("e.promptKind = 'agent'"),
             default => null,
         };
         if (\in_array($filters['kind'] ?? '', self::KINDS, true)) {

@@ -204,6 +204,7 @@ tr.fresh { animation: fresh 1.6s ease-out; }
 table.traffic .excerpt { max-width: 560px; overflow-wrap: anywhere; }
 .kind { font-size: .72rem; padding: .05rem .4rem; border-radius: 5px; background: var(--surface-3); color: var(--muted); }
 .kind-user { background: color-mix(in srgb, var(--accent) 22%, transparent); color: var(--accent); }
+.kind-agent { background: color-mix(in srgb, var(--info) 18%, transparent); color: var(--info); }
 .kind-think { background: color-mix(in srgb, var(--info) 20%, transparent); color: var(--info); }
 .kind-effort { margin-left: .3rem; white-space: nowrap; }
 
@@ -284,6 +285,7 @@ details > summary { cursor: pointer; }
 .timeline li.is-failed::before { background: var(--bad); }
 .timeline-meta { display: flex; gap: .6rem; align-items: center; flex-wrap: wrap; margin-bottom: .35rem; }
 .bubble { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: .6rem .85rem; margin: .3rem 0; white-space: pre-wrap; overflow-wrap: anywhere; max-width: 980px; }
+.bubble-agent { background: color-mix(in srgb, var(--info) 8%, var(--surface)); border-color: color-mix(in srgb, var(--info) 30%, var(--border)); }
 .bubble-user { background: color-mix(in srgb, var(--accent) 12%, var(--surface)); border-color: color-mix(in srgb, var(--accent) 35%, var(--border)); }
 .bubble-think { color: var(--muted); font-style: italic; border-style: dashed; }
 .tool-chips { display: flex; flex-wrap: wrap; gap: .3rem; margin-top: .3rem; }

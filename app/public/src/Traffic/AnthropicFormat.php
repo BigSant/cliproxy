@@ -66,7 +66,7 @@ final class AnthropicFormat
     {
         if (\is_string($content)) {
             $turn->prompt = Turn::cleanPrompt($content);
-            $turn->promptKind = '' !== $turn->prompt ? Turn::PROMPT_USER : Turn::PROMPT_NONE;
+            $turn->promptKind = Turn::promptKindOf($turn->prompt);
 
             return;
         }
@@ -86,7 +86,7 @@ final class AnthropicFormat
             }
         }
         $turn->prompt = Turn::cleanPrompt(implode("\n", $texts));
-        $turn->promptKind = [] !== $turn->toolResults ? Turn::PROMPT_TOOL_RESULTS : ('' !== $turn->prompt ? Turn::PROMPT_USER : Turn::PROMPT_NONE);
+        $turn->promptKind = [] !== $turn->toolResults ? Turn::PROMPT_TOOL_RESULTS : Turn::promptKindOf($turn->prompt);
     }
 
     /**
