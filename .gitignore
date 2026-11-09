@@ -1,0 +1,4 @@
+# Running environment state (DB files, TLS keys, CLIProxyAPI auth) written by setup; never source.
+data/
+.generated/
+.worktrees/
