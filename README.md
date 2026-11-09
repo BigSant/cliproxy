@@ -44,7 +44,7 @@ dalintis ekranu). Išdėstymas – pagal Theo gist'o kvotų puslapį.
 | Kvotos | Kiekvieno tiekėjo paskyros kaip vienas pool'as (kiekviena paskyra – 100 %): likutis „X % iš N×100 %“, grafikas „užfiksuota“ (iš limitų istorijos) ir „prognozė“ (punktyras) per dvi savaites su atsinaujinimų šuoliais (+X %), „Dabar“ linija; „Pool ištuštės“, „Pirma ištuštės“, „Kitas atsinaujinimas“, „Burn“ per 1/3/6 val. Rodiniai: likutis, sąnaudos (%/val.), paskyros atskirai; langai 7 d., 5 val., 7 d. Fable; savaitės perjungimas. |
 | Apžvalga | Paskyros su 5 val., 7 d. ir 7 d. Fable limitais (kiek panaudota, po kiek atsinaujina), 24 val. užklausos, tokenai, cache skaitymai/rašymai, session affinity, gyvas užklausų srautas (kas 5 s). |
 | Paskyros | Prijungti Claude / Codex paskyrą, įjungti/išjungti, prioritetas, svoris, Codex WebSocket'ai, pastaba, rakto atnaujinimas, patikra, pašalinimas. |
-| Naudojimas | 24 val. – 90 d.: per dieną, pagal paskyrą ir modelį; cache santykis; sesijos, peršokusios į kitą paskyrą. |
+| Naudojimas | 24 val. – visas laikas: per dieną, pagal paskyrą ir modelį; cache santykis; sesijos, peršokusios į kitą paskyrą. |
 | Nustatymai | Strategija, session affinity, pakartojimai; soonest-reset-first; klientų raktai; visas `config.yaml`. |
 | Žurnalas | Kiekviena užklausa: įvestis (žmogaus prompt'as ar įrankių rezultatai), mąstymas, atsakymas, įrankių kvietimai su rezultatu (pavyko / klaida), tokenai, trukmė, HTTP būsena. Filtrai, paieška, žalio log'o atsisiuntimas, JSONL eksportas. |
 | Sesijos | Sesijų sąrašas ir kiekvienos laiko juosta: prompt'ai, mąstymas, atsakymai, įrankiai. |
@@ -71,7 +71,7 @@ per CLIProxyAPI `/requests/api-call` su paskyros raktu klausia tiekėjo:
 - Codex – `https://chatgpt.com/backend-api/wham/usage` (pirminis ir antrinis langas, sukaupti atstatymai).
 
 Nepavykus – paskutinio proxy atsakymo `anthropic-ratelimit-unified-*` / `x-codex-*` antraštės (žymima „iš
-antraščių“). Nuotraukos laikomos 30 d.
+antraščių“). Nuotraukos laikomos visam laikui.
 
 ### Kvotų prognozė
 
@@ -95,9 +95,10 @@ header'iai užmaskuoti). Kolektorius (`src/Traffic/`) kas 5 s paima baigtus fail
   (nėra – „neaišku“); jis pažymimas prie to kvietimo (`tool_call`);
 - paskyra ir sesija – iš usage įrašo su ta pačia request id pabaiga (failo vardo paskutiniai 8 simboliai).
 
-Lentelės `exchange` ir `tool_call` laikomos 90 d., ilgi tekstai trumpinami (prompt'as 64 KB, mąstymas ir atsakymas
-256 KB). Žalias failas suspaudžiamas į `cliproxy-traffic/archive/<diena>/` (numatyta 14 d., Nustatymai) ir iš
-`logs/` ištrinamas. Skydelis archyvą tik skaito; `auth/` su paskyrų raktais nei php-fpm, nei cron nemato.
+Lentelėse `exchange` ir `tool_call` ilgi tekstai trumpinami (prompt'as 64 KB, mąstymas ir atsakymas 256 KB); pilnas
+tekstas lieka žaliame faile, kuris suspaudžiamas į `cliproxy-traffic/archive/<diena>/` ir iš `logs/` pašalinamas.
+**Automatinio šalinimo nėra**: nei DB įrašai (usage, limitai, žurnalas), nei archyvas netrinami, CLIProxyAPI log'ų
+valytojas išjungtas (`logs-max-total-size-mb: 0`). Vietą stebėk pats (`du -sh data/<env>/cliproxy-traffic`). Skydelis archyvą tik skaito; `auth/` su paskyrų raktais nei php-fpm, nei cron nemato.
 Žurnale – visas kodas ir pokalbiai: jie lieka tik šiame kompiuteryje.
 
 ### Soonest-reset-first
@@ -113,9 +114,9 @@ prioritetai perrašomi.
 `php bin/console app:collect --duration=55` (cron kas minutę; vienu metu – vienas, `symfony/lock`):
 
 1. kas 5 s ima usage įrašus iš CLIProxyAPI eilės (`/observability/usage/queue`; paimti įrašai iš eilės dingsta,
-   todėl skaitytojas – tik jis) į `usage_record` (90 d.);
-2. kai laikas – limitus (`quota_snapshot`) ir prioritetus;
-3. kartą per valandą – senų įrašų valymas.
+   todėl skaitytojas – tik jis) į `usage_record`;
+2. request log'us į žurnalą (`exchange`, `tool_call`) ir archyvą;
+3. kai laikas – limitus (`quota_snapshot`) ir prioritetus.
 
 Eilė laiko įrašus valandą (`redis-usage-queue-retention-seconds: 3600`), todėl trumpas kolektoriaus ar DB
 nebuvimas duomenų nepraranda. Rankiniu būdu: `make -C app shell`, tada `php bin/console app:collect --quotas`.

@@ -53,7 +53,6 @@ class SettingsController extends AbstractController
             'requestRetry' => (int) ($routing['retry']['request-retry'] ?? 3),
             'usageEnabled' => (bool) ($config['observability']['usage']['usage-statistics-enabled'] ?? false),
             'requestLog' => (bool) ($config['observability']['logs']['request-log'] ?? false),
-            'archiveDays' => $this->settings->archiveDays(),
             'keys' => array_values(array_map('strval', $config['access']['api-keys'] ?? [])),
             'autoPriority' => $this->settings->autoPriority(),
             'refreshMinutes' => $this->settings->quotaRefreshMinutes(),
@@ -100,11 +99,10 @@ class SettingsController extends AbstractController
     public function traffic(Request $request): RedirectResponse
     {
         $this->checkToken($request);
-        $this->settings->set(Settings::ARCHIVE_DAYS, max(1, min(90, $request->request->getInt('archive_days', 14))));
-
         return $this->attempt(fn () => $this->client->patchConfig(['observability' => ['logs' => [
             'request-log' => $request->request->getBoolean('request_log'),
-            'logs-max-total-size-mb' => 2000,
+            // 0: CLIProxyAPI's cleaner never deletes log files; the collector moves them into the archive.
+            'logs-max-total-size-mb' => 0,
         ]]]), 'Srauto žurnalo nustatymai išsaugoti.');
     }
 

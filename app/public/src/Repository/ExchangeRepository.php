@@ -131,25 +131,6 @@ class ExchangeRepository extends ServiceEntityRepository
             ->getResult();
     }
 
-    public function forgetArchiveDay(string $day): void
-    {
-        $this->createQueryBuilder('e')
-            ->update()
-            ->set('e.archivePath', "''")
-            ->where('e.archivePath LIKE :day')
-            ->setParameter('day', $day.'/%')
-            ->getQuery()
-            ->execute();
-    }
-
-    public function deleteOlderThan(\DateTimeImmutable $before): void
-    {
-        $connection = $this->getEntityManager()->getConnection();
-        $before = self::utc($before);
-        $connection->executeStatement('DELETE FROM tool_call WHERE exchange_id IN (SELECT id FROM exchange WHERE occurred_at < ?)', [$before]);
-        $connection->executeStatement('DELETE FROM exchange WHERE occurred_at < ?', [$before]);
-    }
-
     /** @param array<string, string> $filters */
     private function filtered(array $filters, \DateTimeImmutable $since): QueryBuilder
     {

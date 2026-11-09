@@ -52,7 +52,6 @@ class CollectCommand
                         $quotas = false;
                         $io->writeln(\sprintf('Read the limits of %d accounts.', $this->collector->refreshQuotas()));
                     }
-                    $this->collector->pruneIfDue();
                 } catch (ManagementException $exception) {
                     // CLIProxyAPI restarting: the queue keeps its records for an hour, the next pass takes them.
                     $io->warning($exception->getMessage());

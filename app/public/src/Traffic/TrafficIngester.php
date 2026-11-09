@@ -14,7 +14,7 @@ use Symfony\Component\DependencyInjection\Attribute\Autowire;
 /**
  * Takes CLIProxyAPI's request logs (one file per request in its logs directory) into the database: every finished
  * file becomes an Exchange with its tool calls, results of earlier calls are matched to them, the file is compressed
- * into the archive and removed from the logs directory. main.log, CLIProxyAPI's own log, is left alone.
+ * into the archive (kept for good) and removed from the logs directory. main.log, CLIProxyAPI's own log, stays.
  */
 class TrafficIngester
 {
@@ -179,26 +179,6 @@ class TrafficIngester
         }
         $this->entityManager->flush();
         $this->entityManager->clear();
-    }
-
-    /** Raw logs older than $days leave the archive; their exchanges stay. */
-    public function pruneArchive(int $days): void
-    {
-        if (!is_dir($this->archiveDirectory)) {
-            return;
-        }
-        $oldest = $this->clock->now()->modify("-$days days")->format('Y-m-d');
-        foreach (new \DirectoryIterator($this->archiveDirectory) as $day) {
-            if ($day->isDir() && !$day->isDot() && preg_match('/^\d{4}-\d{2}-\d{2}$/', $day->getFilename()) && $day->getFilename() < $oldest) {
-                foreach (new \DirectoryIterator($day->getPathname()) as $file) {
-                    if ($file->isFile()) {
-                        unlink($file->getPathname());
-                    }
-                }
-                rmdir($day->getPathname());
-                $this->exchanges->forgetArchiveDay($day->getFilename());
-            }
-        }
     }
 
     public function archiveFile(Exchange $exchange): ?string

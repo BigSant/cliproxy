@@ -107,15 +107,6 @@ class UsageRecordRepository extends ServiceEntityRepository
             ->getOneOrNullResult();
     }
 
-    public function deleteOlderThan(\DateTimeImmutable $before): int
-    {
-        return (int) $this->getEntityManager()->getConnection()->createQueryBuilder()
-            ->delete('usage_record')
-            ->where('occurred_at < :before')
-            ->setParameter('before', self::utc($before))
-            ->executeStatement();
-    }
-
     /** @return list<array<string, int|string>> */
     private function grouped(\DateTimeImmutable $since, string $group, string $columns): array
     {
