@@ -143,14 +143,23 @@ class ManagementClient
         $this->json('PATCH', '/config', $changes);
     }
 
-    public function configYaml(): string
+    /** @return array{yaml: string, etag: ?string} the file and its version, for a save that refuses lost updates */
+    public function configYaml(): array
     {
-        return $this->request('GET', '/config.yaml')->getContent();
+        $response = $this->request('GET', '/config.yaml');
+        $this->check($response);
+
+        return ['yaml' => $response->getContent(), 'etag' => $response->getHeaders(false)['etag'][0] ?? null];
     }
 
-    public function putConfigYaml(string $yaml): void
+    /** With the ETag read before, CLIProxyAPI refuses the save (412) when the file changed in between. */
+    public function putConfigYaml(string $yaml, ?string $etag = null): void
     {
-        $this->check($this->request('PUT', '/config.yaml', body: $yaml, contentType: 'application/yaml'));
+        $response = $this->request('PUT', '/config.yaml', body: $yaml, contentType: 'application/yaml', headers: null !== $etag ? ['If-Match' => $etag] : []);
+        if (412 === $response->getStatusCode()) {
+            throw new ManagementException('config.yaml pasikeitė, kol jį redagavai (kitas langas ar CLIProxyAPI). Atnaujink puslapį ir pakeisk dar kartą.', 412);
+        }
+        $this->check($response);
     }
 
     /** @return list<string> */
@@ -171,13 +180,38 @@ class ManagementClient
     public function version(): ?string
     {
         try {
-            $response = $this->request('GET', '/config');
+            $response = $this->request('GET', '/config', timeout: 3);
             $headers = $response->getHeaders(false);
 
             return $headers['x-cpa-version'][0] ?? null;
         } catch (ExceptionInterface) {
             return null;
         }
+    }
+
+    /** The newest CLIProxyAPI release (it asks GitHub; call it seldom). */
+    public function latestVersion(): ?string
+    {
+        $latest = $this->json('GET', '/server/latest-version');
+
+        return \is_string($latest['latest-version'] ?? null) ? $latest['latest-version'] : null;
+    }
+
+    /** Re-signs an account in place (same file, priority, note and history), instead of removing and adding it. */
+    public function startRelogin(string $provider, string $name): array
+    {
+        $result = $this->json('GET', '/oauth/auth-url', query: ['provider' => $provider, 'name' => $name]);
+        if (!\is_string($result['url'] ?? null) || !\is_string($result['state'] ?? null)) {
+            throw new ManagementException('CLIProxyAPI did not return a login URL');
+        }
+
+        return ['url' => $result['url'], 'state' => $result['state']];
+    }
+
+    /** Ends an account's cooldown in CLIProxyAPI (its own pause after 429s), not the provider's limit. */
+    public function resetCooldown(string $authIndex): void
+    {
+        $this->json('POST', '/routing/cooldown/reset', ['auth_index' => $authIndex]);
     }
 
     /**
@@ -206,12 +240,13 @@ class ManagementClient
      * @param array<string, mixed>|null $json
      * @param array<string, scalar>      $query
      */
-    private function request(string $method, string $path, ?array $json = null, array $query = [], ?string $body = null, ?string $contentType = null): \Symfony\Contracts\HttpClient\ResponseInterface
+    /** @param array<string, string> $headers */
+    private function request(string $method, string $path, ?array $json = null, array $query = [], ?string $body = null, ?string $contentType = null, float $timeout = 20, array $headers = []): \Symfony\Contracts\HttpClient\ResponseInterface
     {
         $options = [
-            'headers' => ['Authorization' => 'Bearer '.$this->managementKey] + ($contentType ? ['Content-Type' => $contentType] : []),
+            'headers' => ['Authorization' => 'Bearer '.$this->managementKey] + ($contentType ? ['Content-Type' => $contentType] : []) + $headers,
             'query' => $query,
-            'timeout' => 20,
+            'timeout' => $timeout,
         ];
         if (null !== $json) {
             $options['json'] = $json;

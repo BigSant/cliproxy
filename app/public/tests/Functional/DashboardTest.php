@@ -25,6 +25,8 @@ class DashboardTest extends WebTestCase
         $this->browser->disableReboot();
         $this->cliProxy = self::getContainer()->get(FakeCliProxy::class);
         self::resetDatabase(self::getContainer()->get(EntityManagerInterface::class));
+        // The collector ran a moment ago: no "collector stopped" banner in the way.
+        self::getContainer()->get(\App\Settings\Settings::class)->markNow(\App\Settings\Settings::COLLECTOR_HEARTBEAT, new \DateTimeImmutable());
     }
 
     public function testEveryPageButHealthNeedsTheLogin(): void

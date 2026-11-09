@@ -13,7 +13,7 @@
         {% if login %}
             <ol class="steps">
                 <li>
-                    <strong>Atidaryk {{ providers[login.provider] }} prisijungimą</strong> ir prisijunk paskyra, kurią nori pridėti:
+                    <strong>Atidaryk {{ providers[login.provider] }} prisijungimą</strong> ir prisijunk {{ login.relogin is defined ? 'ta pačia paskyra (' ~ login.relogin ~ ')' : 'paskyra, kurią nori pridėti' }}:
                     <div class="copy-row">
                         <a class="button primary" href="{{ login.url }}" target="_blank" rel="noopener noreferrer">Atidaryti {{ providers[login.provider] }}</a>
                         <button type="button" class="button" data-copy="{{ login.url }}">Kopijuoti nuorodą</button>
@@ -88,6 +88,19 @@
                             <input type="hidden" name="disabled" value="{{ account.disabled ? '0' : '1' }}">
                             <button class="button">{{ account.disabled ? 'Įjungti' : 'Išjungti' }}</button>
                         </form>
+                        <form method="post" action="{{ path('app_accounts_relogin') }}">
+                            <input type="hidden" name="_token" value="{{ csrf_token('accounts') }}">
+                            <input type="hidden" name="name" value="{{ account.name }}">
+                            <input type="hidden" name="provider" value="{{ account.provider }}">
+                            <button class="button {{ account.requiresSignIn ? 'primary' }}">Prisijungti iš naujo</button>
+                        </form>
+                        {% if account.cooldowns is not empty %}
+                            <form method="post" action="{{ path('app_accounts_cooldown') }}">
+                                <input type="hidden" name="_token" value="{{ csrf_token('accounts') }}">
+                                <input type="hidden" name="auth_index" value="{{ account.authIndex }}">
+                                <button class="button">Atšaukti pauzę</button>
+                            </form>
+                        {% endif %}
                         <form method="post" action="{{ path('app_accounts_refresh') }}">
                             <input type="hidden" name="_token" value="{{ csrf_token('accounts') }}">
                             <input type="hidden" name="name" value="{{ account.name }}">

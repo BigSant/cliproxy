@@ -54,7 +54,9 @@ class QuotaController extends AbstractController
         } catch (ManagementException $exception) {
             $error = $exception->getMessage();
         }
-        $history = $snapshots->history(array_map(static fn (Account $a) => $a->authIndex, $accounts), new \DateTimeImmutable('@'.min($from, $now->getTimestamp() - 6 * 3600)));
+        // Only what the chart shows: from its start (or the last 6 hours, for the burn) to its end or now.
+        $history = $snapshots->history(array_map(static fn (Account $a) => $a->authIndex, $accounts),
+            new \DateTimeImmutable('@'.min($from, $now->getTimestamp() - 6 * 3600)), new \DateTimeImmutable('@'.min($to, $now->getTimestamp())));
 
         $cards = [];
         foreach (self::PROVIDERS as $key => $label) {

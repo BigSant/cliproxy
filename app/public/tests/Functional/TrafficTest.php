@@ -31,7 +31,7 @@ class TrafficTest extends WebTestCase
         $this->browser->disableReboot();
         $this->entityManager = self::getContainer()->get(EntityManagerInterface::class);
         self::resetDatabase($this->entityManager);
-        foreach ([self::LOGS, self::ARCHIVE] as $directory) {
+        foreach ([self::LOGS, self::ARCHIVE, '/tmp/cliproxy-test/quarantine'] as $directory) {
             if (is_dir($directory)) {
                 exec('rm -rf '.escapeshellarg($directory));
             }
@@ -55,6 +55,7 @@ class TrafficTest extends WebTestCase
         $this->entityManager->flush();
 
         self::assertSame(2, self::getContainer()->get(TrafficIngester::class)->ingest());
+        self::getContainer()->get(TrafficIngester::class)->linkAccounts();
 
         $first = $this->entityManager->getRepository(Exchange::class)->findOneBy(['requestTail' => 'aaaa1111']);
         self::assertSame('claude', $first->provider);
@@ -67,7 +68,7 @@ class TrafficTest extends WebTestCase
         self::assertSame([12, 85, 9000, 300], [$first->inputTokens, $first->outputTokens, $first->cacheReadTokens, $first->cacheCreationTokens]);
         self::assertSame('11111111-2222-3333-4444-555555555555', $first->sessionId);
         self::assertSame('me@example.com', $first->account, 'joined with its usage record');
-        self::assertSame('claude-cli/2.1.280', $first->client);
+        self::assertSame('claude-cli/2.1.280 (external, cli)', $first->client);
         self::assertFalse($first->failed);
         $call = $first->getToolCalls()->first();
         self::assertSame(['Bash', '{"command":"bin/phpunit"}'], [$call->name, $call->input]);
@@ -100,6 +101,69 @@ class TrafficTest extends WebTestCase
         $call = $this->entityManager->getRepository(ToolCall::class)->findOneBy(['callId' => 'call_9']);
         self::assertSame('exec_command', $call->name);
         self::assertTrue($call->isError, 'exit code 2');
+    }
+
+    public function testACodexWebsocketConnectionBecomesOneExchangePerTurn(): void
+    {
+        $this->write('v1-responses-2026-11-09T151000-wwww9999.log', RequestLogs::codexWebsocket());
+        $this->entityManager->persist(UsageRecord::fromQueueRecord(['timestamp' => '2026-11-09T13:00:04Z', 'request_id' => 'req-a', 'auth_index' => 'idx-c',
+            'source' => 'codex@example.com', 'session_id' => 'ws-session', 'provider' => 'codex', 'latency_ms' => 3500]));
+        $this->entityManager->flush();
+
+        self::assertSame(1, self::getContainer()->get(TrafficIngester::class)->ingest());
+        self::getContainer()->get(TrafficIngester::class)->linkAccounts();
+
+        $turns = $this->entityManager->getRepository(Exchange::class)->findBy([], ['occurredAt' => 'ASC']);
+        self::assertCount(2, $turns);
+        [$first, $second] = $turns;
+        self::assertSame(['Paleisk testus', 'Paleisiu phpunit.', 'completed', 200, false], [$first->prompt, $first->thinking, $first->stopReason, $first->statusCode, $first->failed]);
+        self::assertSame('ws-session', $first->sessionId);
+        self::assertSame('codex@example.com', $first->account, 'found by session and time');
+        self::assertSame(3500, $first->durationMs);
+        self::assertSame('tool_results', $second->promptKind);
+        self::assertSame('Vienas testas krenta.', $second->answer);
+        $call = $this->entityManager->getRepository(ToolCall::class)->findOneBy(['callId' => 'call_ws1']);
+        self::assertTrue($call->isError, 'exit code 1 in the next turn');
+        self::assertStringEndsWith('#1', $first->logFile);
+    }
+
+    public function testTakingAFileAgainReplacesItsRowsInsteadOfAdding(): void
+    {
+        $this->write('v1-messages-2026-11-09T150000-aaaa1111.log', RequestLogs::claudeToolUse());
+        $copy = RequestLogs::claudeToolUse();
+        self::getContainer()->get(TrafficIngester::class)->ingest();
+        $this->write('v1-messages-2026-11-09T150000-aaaa1111.log', $copy);
+        self::getContainer()->get(TrafficIngester::class)->ingest();
+
+        self::assertSame(1, $this->entityManager->getRepository(Exchange::class)->count([]));
+        self::assertSame(1, $this->entityManager->getRepository(ToolCall::class)->count([]));
+    }
+
+    public function testAFileThatCannotBeTakenGoesToQuarantineAndTheNextOnesStillCome(): void
+    {
+        $this->write('v1-messages-2026-11-09T150000-aaaa1111.log', RequestLogs::claudeToolUse());
+        $this->write('v1-messages-2026-11-09T150020-bbbb2222.log', RequestLogs::claudeToolResult());
+        // The first file's archive day cannot be written: a file stands where its directory would be.
+        file_put_contents(self::ARCHIVE.'/2026-11-09', 'not a directory');
+
+        $ingester = self::getContainer()->get(TrafficIngester::class);
+        self::assertSame(0, $ingester->ingest());
+
+        self::assertSame(['v1-messages-2026-11-09T150000-aaaa1111.log', 'v1-messages-2026-11-09T150020-bbbb2222.log'], $ingester->quarantined());
+        self::assertFileExists('/tmp/cliproxy-test/quarantine/v1-messages-2026-11-09T150000-aaaa1111.log.error');
+        self::assertSame([], glob(self::LOGS.'/v1-*'));
+    }
+
+    public function testInjectedRemindersAreNotPartOfThePrompt(): void
+    {
+        $this->write('v1-messages-2026-11-09T150000-cccc1111.log', RequestLogs::file('/v1/messages', ['model' => 'claude-fable-5-1', 'messages' => [['role' => 'user', 'content' => [
+            ['type' => 'text', 'text' => "<system-reminder>\nThe date is …\n</system-reminder>"],
+            ['type' => 'text', 'text' => 'Sutvarkyk testus'],
+        ]]]], '{"type":"message","content":[],"usage":{}}'));
+
+        self::getContainer()->get(TrafficIngester::class)->ingest();
+
+        self::assertSame('Sutvarkyk testus', $this->entityManager->getRepository(Exchange::class)->findOneBy([])->prompt);
     }
 
     public function testAFailedRequestKeepsItsError(): void

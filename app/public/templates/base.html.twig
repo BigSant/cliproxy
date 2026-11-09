@@ -29,7 +29,14 @@
                         <div class="nav-group">Hub'as</div>
                         <a href="{{ path('app_settings') }}" class="{{ route == 'app_settings' ? 'active' }}">{{ ui.icon('settings') }} Nustatymai</a>
                         <a href="{{ path('app_connect') }}" class="{{ route == 'app_connect' ? 'active' }}">{{ ui.icon('connect') }} Prijungimas</a>
+                        {% set hub = hub_status() %}
+                        <a href="{{ path('app_alerts') }}" class="{{ route == 'app_alerts' ? 'active' }}">{{ ui.icon('alert') }} Įspėjimai{% if hub.errors + hub.warnings > 0 %}<span class="nav-badge {{ hub.errors == 0 ? 'warn' }}">{{ hub.errors + hub.warnings }}</span>{% endif %}</a>
                     </nav>
+                    <div class="sidebar-foot">
+                        <span>CLIProxyAPI {{ hub.version ?? '–' }}</span>
+                        {% if hub.latest %}<a class="update" href="{{ path('app_alerts') }}">yra {{ hub.latest }}</a>{% endif %}
+                        <span class="{{ hub.collectorStale ? 'bad' }}">kolektorius {{ hub.collectorSeen|ago }}</span>
+                    </div>
                 </aside>
                 <div class="content">
                     <header class="topbar">
@@ -46,6 +53,11 @@
                         </div>
                     </header>
                     <main class="{% block main_class %}page{% endblock %}">
+                        {% if hub.collectorStale %}
+                            <div class="flash flash-error banner" role="alert"><strong>Kolektorius neveikia</strong> (paskutinis paleidimas {{ hub.collectorSeen|ago }}): usage, žurnalas ir limitai nesirenka. Tikrink cron konteinerį (<code>docker logs cliproxy-&lt;env&gt;-cron</code>).</div>
+                        {% elseif hub.collectorError %}
+                            <div class="flash flash-notice" role="status"><strong>Kolektoriaus klaida:</strong> {{ hub.collectorError }}</div>
+                        {% endif %}
                         {% include '_parts/flashes.html.twig' %}
                         {% block body %}{% endblock %}
                     </main>

@@ -16,6 +16,7 @@ use Doctrine\ORM\Mapping as ORM;
 #[ORM\Index(name: 'exchange_occurred', columns: ['occurred_at'])]
 #[ORM\Index(name: 'exchange_session', columns: ['session_id', 'occurred_at'])]
 #[ORM\Index(name: 'exchange_request', columns: ['request_tail'])]
+#[ORM\Index(name: 'exchange_fulltext', columns: ['prompt', 'answer', 'thinking', 'error'], flags: ['fulltext'])]
 class Exchange
 {
     #[ORM\Id]
@@ -66,6 +67,12 @@ class Exchange
     public int $cacheCreationTokens = 0;
     #[ORM\Column]
     public int $reasoningTokens = 0;
+    /** main, subagent, compaction, fork, side (Turn::KIND_*): only main turns are a person's work. */
+    #[ORM\Column(length: 16, options: ['default' => 'main'])]
+    public string $kind = 'main';
+    /** Whether $thinking is set: lists and counts read this, not the long text. */
+    #[ORM\Column(options: ['default' => false])]
+    public bool $hasThinking = false;
     /** user (a person wrote), tool_results (the loop went on), none */
     #[ORM\Column(length: 16)]
     public string $promptKind = 'none';
@@ -90,7 +97,7 @@ class Exchange
     public int $requestBytes = 0;
     #[ORM\Column]
     public int $responseBytes = 0;
-    /** Path of the compressed raw log, relative to the archive; empty once the archive dropped it. */
+    /** Path of the compressed raw log, relative to the archive (kept for good). */
     #[ORM\Column(length: 255)]
     public string $archivePath = '';
 
@@ -114,6 +121,12 @@ class Exchange
     public function getToolCalls(): Collection
     {
         return $this->toolCalls;
+    }
+
+    public function clearToolCalls(): void
+    {
+        $this->toolCalls->clear();
+        $this->toolCallCount = 0;
     }
 
     public function addToolCall(ToolCall $call): void

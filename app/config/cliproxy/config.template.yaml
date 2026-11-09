@@ -20,9 +20,15 @@ routing:
   # Prompt caches belong to one account: keep a session on the account it started on.
   session-affinity: true
   session-affinity-ttl: "1h"
+  # A session moves to another account only when its own runs out of quota (a cache rewrite costs limits too).
+  session-affinity-rebind-on: "quota"
   retry:
     request-retry: 3
     max-retry-interval: 30
+upstream:
+  claude:
+    # A model's quota (Claude's weekly Fable window) cools down that model only, not the whole account.
+    model-level-cooling: true
 oauth:
   auth-dir: "/CLIProxyAPI/state/auth"
 observability:
@@ -32,6 +38,8 @@ observability:
     request-log: true
     # 0: CLIProxyAPI's cleaner never deletes log files; nothing in the hub is deleted automatically.
     logs-max-total-size-mb: 0
+    # 0: error logs are not rotated away either.
+    error-logs-max-files: 0
   usage:
     # The dashboard's collector (app:collect, cron) takes every record from the queue into the database; an hour of
     # retention covers a collector that is down for a while.

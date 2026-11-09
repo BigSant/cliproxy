@@ -13,6 +13,8 @@ services:
     environment:
       TZ: ${TZ}
       HOME: /tmp
+      # Changes with app/config/cliproxy/*, so compose recreates the container (env/common.env).
+      CLIPROXY_CONFIG_REV: ${CLIPROXY_CONFIG_REV:?Set CLIPROXY_CONFIG_REV in env/common.env}
       MANAGEMENT_PASSWORD: ${CLIPROXY_MANAGEMENT_KEY:?Set CLIPROXY_MANAGEMENT_KEY in env/<env>.env}
       # Only the first start of an empty state directory reads it (config.yaml's access.api-keys); afterwards the
       # dashboard's settings page manages the keys.
@@ -46,6 +48,7 @@ services:
       CLIPROXY_MANAGEMENT_URL: http://cliproxy:8317
       CLIPROXY_LOG_DIR: /var/lib/cliproxy/logs
       TRAFFIC_ARCHIVE_DIR: /var/lib/cliproxy/archive
+      USAGE_SPOOL_DIR: /var/lib/cliproxy/usage
     volumes:
       - ${PROJECT_DATA_DIRECTORY}/cliproxy-traffic/:/var/lib/cliproxy/:ro
   cron:
@@ -56,5 +59,6 @@ services:
       CLIPROXY_MANAGEMENT_URL: http://cliproxy:8317
       CLIPROXY_LOG_DIR: /var/lib/cliproxy/logs
       TRAFFIC_ARCHIVE_DIR: /var/lib/cliproxy/archive
+      USAGE_SPOOL_DIR: /var/lib/cliproxy/usage
     volumes:
       - ${PROJECT_DATA_DIRECTORY}/cliproxy-traffic/:/var/lib/cliproxy/

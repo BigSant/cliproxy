@@ -17,9 +17,15 @@ final readonly class QuotaWindow
     ) {
     }
 
-    public function isExhausted(): bool
+    /** The used share now: 0 once the window has reset, whatever the last reading said. */
+    public function usedAt(\DateTimeImmutable $now): float
     {
-        return $this->used >= 99.5;
+        return null !== $this->resetsAt && $this->resetsAt <= $now ? 0.0 : $this->used;
+    }
+
+    public function isExhausted(?\DateTimeImmutable $now = null): bool
+    {
+        return (null === $now ? $this->used : $this->usedAt($now)) >= 99.5;
     }
 
     /** @return array{key: string, label: string, used: float, resetsAt: ?string} */

@@ -26,6 +26,7 @@ class TrafficController extends AbstractController
         private readonly ExchangeRepository $exchanges,
         private readonly ToolCallRepository $toolCalls,
         private readonly ClockInterface $clock,
+        private readonly \Doctrine\ORM\EntityManagerInterface $entityManager,
     ) {
     }
 
@@ -92,17 +93,18 @@ class TrafficController extends AbstractController
     {
         [$range, $since] = $this->range($request);
         $filters = $this->filters($request);
-        $response = new StreamedResponse(function () use ($filters, $since) {
-            for ($offset = 0; ; $offset += 200) {
-                $batch = $this->exchanges->search($filters, $since, 200, $offset);
+        $entityManager = $this->entityManager;
+        $response = new StreamedResponse(function () use ($filters, $since, $entityManager) {
+            $before = null;
+            do {
+                $batch = $this->exchanges->exportBatch($filters, $since, $before, 200);
                 foreach ($batch as $exchange) {
                     echo json_encode(self::exportRow($exchange), \JSON_UNESCAPED_UNICODE | \JSON_UNESCAPED_SLASHES | \JSON_INVALID_UTF8_SUBSTITUTE), "\n";
+                    $before = (int) $exchange->getId();
                 }
                 flush();
-                if (\count($batch) < 200) {
-                    break;
-                }
-            }
+                $entityManager->clear();
+            } while (200 === \count($batch));
         });
         $response->headers->set('Content-Type', 'application/x-ndjson; charset=utf-8');
         $response->headers->set('Content-Disposition', \sprintf('attachment; filename="cliproxy-%s-%s.jsonl"', $range, $this->clock->now()->format('Ymd-His')));
@@ -157,15 +159,18 @@ class TrafficController extends AbstractController
         return [$range, $this->clock->now()->modify(UsageController::RANGES[$range][0])];
     }
 
-    /** @return array{provider: string, model: string, account: string, session: string, outcome: string, q: string} */
+    /** @return array{provider: string, model: string, account: string, session: string, outcome: string, kind: string, q: string} */
     private function filters(Request $request): array
     {
         $filters = [];
-        foreach (['provider', 'model', 'account', 'session', 'outcome', 'q'] as $key) {
+        foreach (['provider', 'model', 'account', 'session', 'outcome', 'kind', 'q'] as $key) {
             $filters[$key] = mb_substr(trim((string) $request->query->get($key, '')), 0, 190);
         }
         if (!\in_array($filters['outcome'], ExchangeRepository::OUTCOMES, true)) {
             $filters['outcome'] = '';
+        }
+        if (!\in_array($filters['kind'], ExchangeRepository::KINDS, true)) {
+            $filters['kind'] = '';
         }
 
         return $filters;
@@ -182,6 +187,7 @@ class TrafficController extends AbstractController
             'endpoint' => $exchange->endpoint,
             'client' => $exchange->client,
             'session_id' => $exchange->sessionId,
+            'kind' => $exchange->kind,
             'account' => $exchange->account,
             'status' => $exchange->statusCode,
             'failed' => $exchange->failed,

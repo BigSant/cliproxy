@@ -98,4 +98,27 @@ final class RequestLogs
         ], json_encode(['model' => 'gpt-5.5-codex', 'status' => 'completed', 'output' => [['type' => 'message', 'content' => [['type' => 'output_text', 'text' => 'Katalogas tuščias.']]]], 'usage' => ['input_tokens' => 10, 'output_tokens' => 5]]),
             userAgent: 'codex_cli_rs/0.149.1', at: '2026-11-09T15:01:00.000000000+02:00');
     }
+
+    /** A Codex WebSocket connection: two turns, the second sending the first one's tool result (exit code 1). */
+    public static function codexWebsocket(): string
+    {
+        $event = static fn (string $at, string $type, array $payload) => "Timestamp: $at\nEvent: websocket.$type\n".json_encode($payload, \JSON_UNESCAPED_UNICODE)."\n";
+        $timeline = implode("\n", [
+            $event('2026-11-09T15:00:00.000000000+02:00', 'request', ['type' => 'response.create', 'model' => 'gpt-5.5-codex', 'prompt_cache_key' => 'ws-session',
+                'input' => [['type' => 'message', 'role' => 'user', 'content' => [['type' => 'input_text', 'text' => "<environment_context>cwd</environment_context>\nPaleisk testus"]]]]]),
+            $event('2026-11-09T15:00:02.000000000+02:00', 'response', ['type' => 'response.output_item.done', 'item' => ['type' => 'reasoning', 'summary' => [['type' => 'summary_text', 'text' => 'Paleisiu phpunit.']]]]),
+            $event('2026-11-09T15:00:03.000000000+02:00', 'response', ['type' => 'response.output_item.done', 'item' => ['type' => 'function_call', 'name' => 'exec_command', 'call_id' => 'call_ws1', 'arguments' => '{"cmd":["bin/phpunit"]}']]),
+            $event('2026-11-09T15:00:03.500000000+02:00', 'response', ['type' => 'response.completed', 'response' => ['model' => 'gpt-5.5-codex', 'status' => 'completed', 'output' => [], 'usage' => ['input_tokens' => 900, 'input_tokens_details' => ['cached_tokens' => 800], 'output_tokens' => 30]]]),
+            $event('2026-11-09T15:00:40.000000000+02:00', 'request', ['type' => 'response.create', 'model' => 'gpt-5.5-codex', 'prompt_cache_key' => 'ws-session', 'previous_response_id' => 'resp_1',
+                'input' => [['type' => 'function_call_output', 'call_id' => 'call_ws1', 'output' => '{"output":"FAILURES!","metadata":{"exit_code":1}}']]]),
+            $event('2026-11-09T15:00:45.000000000+02:00', 'response', ['type' => 'response.completed', 'response' => ['model' => 'gpt-5.5-codex', 'status' => 'completed',
+                'output' => [['type' => 'message', 'content' => [['type' => 'output_text', 'text' => 'Vienas testas krenta.']]]], 'usage' => ['input_tokens' => 50, 'output_tokens' => 8]]]),
+            $event('2026-11-09T15:10:00.000000000+02:00', 'disconnect', ['message' => 'client closed']),
+        ]);
+
+        return "=== REQUEST INFO ===\nVersion: v8.0.61\nURL: /v1/responses\nMethod: GET\nDownstream Transport: websocket\nUpstream Transport: websocket\nTimestamp: 2026-11-09T15:00:00.000000000+02:00\n\n\n"
+            ."=== HEADERS ===\nUser-Agent: codex_cli_rs/0.149.1\nSession_id: ws-session\nUpgrade: websocket\n\n\n"
+            ."=== WEBSOCKET TIMELINE ===\n".$timeline."\n\n"
+            ."=== API WEBSOCKET TIMELINE ===\nTimestamp: 2026-11-09T15:00:00.000000000+02:00\nEvent: websocket.request\n{}\n";
+    }
 }

@@ -75,6 +75,10 @@ final class PoolForecast
         foreach ($series as $authIndex => $account) {
             $forecast->accounts[$authIndex] = ['label' => $account['label'], 'recorded' => [], 'projected' => []];
             $last = end($account['values']);
+            // A window whose reset has passed since the last reading is whole again.
+            if (null !== $last['reset'] && $last['reset'] <= $now) {
+                $last = ['t' => $now, 'used' => 0.0, 'reset' => $last['reset'] + $windowSeconds * (intdiv($now - $last['reset'], $windowSeconds) + 1)];
+            }
             $forecast->poolNow += 100 - $last['used'];
             $spent = 0.0;
             $previous = null;

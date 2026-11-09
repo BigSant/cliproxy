@@ -1,0 +1,11 @@
+# Every table of the hub is data to keep: setup-server's nightly backups take structure and data of "import" tables
+# (setup doc/lt/07-duomenu-baze.md, "Lentelių registras"). The traffic archive and the usage spool are files in
+# data/<env>/cliproxy-traffic, outside the database.
+# lentelė                     grupė      rinkinys  LIVE importas
+usage_record                  usage      full      import
+quota_snapshot                quota      full      import
+exchange                      traffic    full      import
+tool_call                     traffic    full      import
+alert                         hub        full      import
+setting                       hub        full      import
+doctrine_migration_versions   hub        full      import

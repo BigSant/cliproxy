@@ -64,6 +64,12 @@ jobs:
           persist-credentials: false
       - name: Install dependencies (network, no scripts or plugins)
         run: ci/.github/ci/install source
+      - name: CLIPROXY_CONFIG_REV matches app/config/cliproxy
+        # A stale value would let a deploy keep the old container with the old entrypoint and template.
+        run: |
+          want=$(cd source/app/config/cliproxy && for f in $(ls | sort); do printf '%s\0' "$f"; cat "$f"; printf '\0'; done | sha256sum | cut -c1-12)
+          have=$(sed -n 's/^CLIPROXY_CONFIG_REV=//p' source/app/env/common.env)
+          [ "$want" = "$have" ] || { echo "::error::CLIPROXY_CONFIG_REV in app/env/common.env is $have; app/config/cliproxy needs $want"; exit 1; }
       - name: Lint without network
         run: |
           image=$(ci/.github/ci/php-image)

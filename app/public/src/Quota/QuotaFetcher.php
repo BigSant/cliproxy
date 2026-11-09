@@ -33,13 +33,14 @@ class QuotaFetcher
     ) {
     }
 
-    public function fetch(Account $account): QuotaSnapshot
+    /** @param ?string $userAgent the newest real client's, so the request looks like that client */
+    public function fetch(Account $account, ?string $userAgent = null): QuotaSnapshot
     {
         $error = null;
         try {
             $snapshot = match (true) {
-                $account->isClaude() => $this->claude($account),
-                $account->isCodex() => $this->codex($account),
+                $account->isClaude() => $this->claude($account, $userAgent),
+                $account->isCodex() => $this->codex($account, $userAgent),
                 default => null,
             };
             if (null !== $snapshot) {
@@ -49,16 +50,17 @@ class QuotaFetcher
             $error = mb_substr($exception->getMessage(), 0, 255);
         }
 
-        return new QuotaSnapshot($account->authIndex, $account->label(), $account->provider, $this->clock->now(),
+        // The headers are as old as the answer that carried them, not "now".
+        return new QuotaSnapshot($account->authIndex, $account->label(), $account->provider, $account->signalsObservedAt ?? $this->clock->now(),
             self::fromHeaders($account->signals), 'headers', $account->planType, null, $error);
     }
 
-    private function claude(Account $account): QuotaSnapshot
+    private function claude(Account $account, ?string $userAgent): QuotaSnapshot
     {
         $body = $this->call($account, self::CLAUDE_USAGE_URL, [
             'Authorization' => 'Bearer $TOKEN$',
             'anthropic-beta' => 'oauth-2025-04-20',
-            'User-Agent' => 'claude-cli/2.1.280 (external, cli)',
+            'User-Agent' => $userAgent ?? 'claude-cli/2.1.312 (external, cli)',
             'Content-Type' => 'application/json',
             'Accept' => 'application/json',
         ]);
@@ -67,12 +69,12 @@ class QuotaFetcher
             self::claudeWindows($body), 'live', $account->planType);
     }
 
-    private function codex(Account $account): QuotaSnapshot
+    private function codex(Account $account, ?string $userAgent): QuotaSnapshot
     {
         $headers = [
             'Authorization' => 'Bearer $TOKEN$',
             'Content-Type' => 'application/json',
-            'User-Agent' => 'codex_cli_rs/0.149.1',
+            'User-Agent' => $userAgent ?? 'codex_cli_rs/0.149.1',
         ];
         if (null !== $account->chatgptAccountId) {
             $headers['Chatgpt-Account-Id'] = $account->chatgptAccountId;

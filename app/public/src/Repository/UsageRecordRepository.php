@@ -15,7 +15,10 @@ use Doctrine\Persistence\ManagerRegistry;
  */
 class UsageRecordRepository extends ServiceEntityRepository
 {
-    private const string SUMS = 'COUNT(*) AS requests, SUM(CASE WHEN failed = 1 THEN 1 ELSE 0 END) AS failed,'
+    // A retry or a switch to another account is another record with the same request id: requests count the ids,
+    // attempts every record.
+    private const string SUMS = "COUNT(DISTINCT CASE WHEN request_id = '' THEN CAST(id AS CHAR) ELSE request_id END) AS requests,"
+        .' COUNT(*) AS attempts, SUM(CASE WHEN failed = 1 THEN 1 ELSE 0 END) AS failed,'
         .' SUM(input_tokens) AS input, SUM(output_tokens) AS output, SUM(cache_read_tokens) AS cache_read,'
         .' SUM(cache_creation_tokens) AS cache_creation, SUM(cache_creation5m_tokens) AS cache_5m,'
         .' SUM(cache_creation1h_tokens) AS cache_1h, SUM(total_tokens) AS total';
@@ -25,7 +28,7 @@ class UsageRecordRepository extends ServiceEntityRepository
         parent::__construct($registry, UsageRecord::class);
     }
 
-    /** @return array{requests: int, failed: int, input: int, output: int, cache_read: int, cache_creation: int, cache_5m: int, cache_1h: int, total: int} */
+    /** @return array{requests: int, failed: int, input: int, output: int, cache_read: int, cache_creation: int, cache_5m: int, cache_1h: int, total: int, attempts: int} */
     public function totals(\DateTimeImmutable $since): array
     {
         $row = $this->since($since)->select(self::SUMS)->fetchAssociative() ?: [];
@@ -45,16 +48,34 @@ class UsageRecordRepository extends ServiceEntityRepository
         return $this->grouped($since, 'model', 'model, MAX(provider) AS provider');
     }
 
-    /** @return list<array<string, int|string>> one row per UTC day, oldest first */
+    /**
+     * One row per local day (Europe/Vilnius, PHP's zone), oldest first: summed per UTC hour in SQL, folded into days
+     * here, so a day starts at local midnight.
+     *
+     * @return list<array<string, int|string>>
+     */
     public function byDay(\DateTimeImmutable $since): array
     {
         $rows = $this->since($since)
-            ->select('SUBSTR(occurred_at, 1, 10) AS day, '.self::SUMS)
-            ->groupBy('SUBSTR(occurred_at, 1, 10)')
-            ->orderBy('day')
+            ->select('SUBSTR(occurred_at, 1, 13) AS hour, '.self::SUMS)
+            ->groupBy('SUBSTR(occurred_at, 1, 13)')
+            ->orderBy('hour')
             ->fetchAllAssociative();
+        $zone = new \DateTimeZone(date_default_timezone_get());
+        $days = [];
+        foreach ($rows as $row) {
+            $day = (new \DateTimeImmutable($row['hour'].':00:00', new \DateTimeZone('UTC')))->setTimezone($zone)->format('Y-m-d');
+            $numbers = self::numbers($row);
+            if (!isset($days[$day])) {
+                $days[$day] = ['day' => $day] + $numbers;
+                continue;
+            }
+            foreach ($numbers as $key => $value) {
+                $days[$day][$key] += $value;
+            }
+        }
 
-        return array_map(static fn (array $row) => ['day' => (string) $row['day']] + self::numbers($row), $rows);
+        return array_values($days);
     }
 
     /**
@@ -90,7 +111,56 @@ class UsageRecordRepository extends ServiceEntityRepository
         return $this->findBy([], ['occurredAt' => 'DESC', 'id' => 'DESC'], $limit);
     }
 
-    /** The usage record of a request: the same request id ending, within a quarter of an hour. */
+    /**
+     * @param list<string> $keys
+     *
+     * @return list<string> those already stored
+     */
+    public function existingKeys(array $keys): array
+    {
+        if ([] === $keys) {
+            return [];
+        }
+
+        return array_map('strval', $this->getEntityManager()->getConnection()->createQueryBuilder()
+            ->select('record_key')
+            ->from('usage_record')
+            ->where('record_key IN (:keys)')
+            ->setParameter('keys', $keys, \Doctrine\DBAL\ArrayParameterType::STRING)
+            ->fetchFirstColumn());
+    }
+
+    /**
+     * The newest User-Agent of a real client per provider: the limits requests then look like that client.
+     *
+     * @return array<string, string>
+     */
+    public function latestUserAgents(): array
+    {
+        $agents = [];
+        foreach (['claude' => 'claude-cli/', 'codex' => 'codex'] as $provider => $prefix) {
+            $agent = $this->getEntityManager()->getConnection()->createQueryBuilder()
+                ->select('user_agent')
+                ->from('usage_record')
+                ->where('provider = :provider')
+                ->andWhere('user_agent LIKE :prefix')
+                ->setParameter('provider', $provider)
+                ->setParameter('prefix', $prefix.'%')
+                ->orderBy('id', 'DESC')
+                ->setMaxResults(1)
+                ->fetchOne();
+            if (\is_string($agent) && '' !== $agent) {
+                $agents[$provider] = $agent;
+            }
+        }
+
+        return $agents;
+    }
+
+    /**
+     * The usage record of a request: the same request id ending, between its start and three hours later (a long
+     * stream finishes late); its last attempt, which is the one that answered.
+     */
     public function forRequest(string $requestTail, \DateTimeImmutable $at): ?UsageRecord
     {
         if ('' === $requestTail) {
@@ -101,8 +171,31 @@ class UsageRecordRepository extends ServiceEntityRepository
             ->where('u.requestTail = :tail')
             ->andWhere('u.occurredAt BETWEEN :from AND :to')
             ->setParameter('tail', $requestTail)
-            ->setParameter('from', $at->modify('-15 minutes'), 'utc_datetime_immutable')
-            ->setParameter('to', $at->modify('+15 minutes'), 'utc_datetime_immutable')
+            ->setParameter('from', $at->modify('-5 minutes'), 'utc_datetime_immutable')
+            ->setParameter('to', $at->modify('+3 hours'), 'utc_datetime_immutable')
+            ->orderBy('u.occurredAt', 'DESC')
+            ->setMaxResults(1)
+            ->getQuery()
+            ->getOneOrNullResult();
+    }
+
+    /**
+     * For requests whose log does not carry their own request id (a Codex WebSocket connection logs many in one file):
+     * the session's record closest after the request started.
+     */
+    public function forSession(string $sessionId, \DateTimeImmutable $at): ?UsageRecord
+    {
+        if ('' === $sessionId) {
+            return null;
+        }
+
+        return $this->createQueryBuilder('u')
+            ->where('u.sessionId = :session')
+            ->andWhere('u.occurredAt BETWEEN :from AND :to')
+            ->setParameter('session', $sessionId)
+            ->setParameter('from', $at->modify('-1 minute'), 'utc_datetime_immutable')
+            ->setParameter('to', $at->modify('+30 minutes'), 'utc_datetime_immutable')
+            ->orderBy('u.occurredAt', 'ASC')
             ->setMaxResults(1)
             ->getQuery()
             ->getOneOrNullResult();
@@ -140,12 +233,12 @@ class UsageRecordRepository extends ServiceEntityRepository
     /**
      * @param array<string, mixed> $row
      *
-     * @return array{requests: int, failed: int, input: int, output: int, cache_read: int, cache_creation: int, cache_5m: int, cache_1h: int, total: int}
+     * @return array{requests: int, failed: int, input: int, output: int, cache_read: int, cache_creation: int, cache_5m: int, cache_1h: int, total: int, attempts: int}
      */
     private static function numbers(array $row): array
     {
         $numbers = [];
-        foreach (['requests', 'failed', 'input', 'output', 'cache_read', 'cache_creation', 'cache_5m', 'cache_1h', 'total'] as $key) {
+        foreach (['requests', 'attempts', 'failed', 'input', 'output', 'cache_read', 'cache_creation', 'cache_5m', 'cache_1h', 'total'] as $key) {
             $numbers[$key] = (int) ($row[$key] ?? 0);
         }
 

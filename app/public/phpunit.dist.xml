@@ -22,6 +22,7 @@
         <server name="ADMIN_PASSWORD" value="test-password" force="true" />
         <server name="CLIPROXY_LOG_DIR" value="/tmp/cliproxy-test/logs" force="true" />
         <server name="TRAFFIC_ARCHIVE_DIR" value="/tmp/cliproxy-test/archive" force="true" />
+        <server name="USAGE_SPOOL_DIR" value="/tmp/cliproxy-test/usage" force="true" />
     </php>
 
     <testsuites>

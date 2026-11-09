@@ -12,6 +12,16 @@ final class Turn
     public const string PROMPT_TOOL_RESULTS = 'tool_results';
     public const string PROMPT_NONE = 'none';
 
+    public const string KIND_MAIN = 'main';
+    public const string KIND_SUBAGENT = 'subagent';
+    public const string KIND_COMPACTION = 'compaction';
+    public const string KIND_FORK = 'fork';
+    /** A client's own small request: a 1-token check, a title or summary on the side. */
+    public const string KIND_SIDE = 'side';
+
+    /** Blocks the clients add to a person's message on their own: reminders, environment, instructions. */
+    private const string INJECTED = '/<(system-reminder|environment_context|user_instructions|ide_selection|ide_opened_file)\b[^>]*>.*?<\/\1>/s';
+
     public string $model = '';
     public bool $stream = false;
     public string $prompt = '';
@@ -33,6 +43,7 @@ final class Turn
     public int $messageCount = 0;
     public int $systemChars = 0;
     public int $toolsDeclared = 0;
+    public string $kind = self::KIND_MAIN;
 
     /**
      * Server-sent events: the JSON of every "data:" line, with its "event:" name when the line before gave one.
@@ -56,6 +67,12 @@ final class Turn
         }
 
         return $events;
+    }
+
+    /** A person's text without what the client injected into it. */
+    public static function cleanPrompt(string $text): string
+    {
+        return trim(preg_replace(self::INJECTED, '', $text) ?? $text);
     }
 
     public static function isEventStream(string $body): bool
