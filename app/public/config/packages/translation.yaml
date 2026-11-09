@@ -1,0 +1,7 @@
+# The dashboard speaks Lithuanian unless the person picks English (LT | EN in the top bar; App\EventSubscriber\LocaleSubscriber).
+framework:
+    default_locale: lt
+    enabled_locales: [lt, en]
+    translator:
+        default_path: '%kernel.project_dir%/translations'
+        fallbacks: [lt]

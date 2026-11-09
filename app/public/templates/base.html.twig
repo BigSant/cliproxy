@@ -1,6 +1,6 @@
 {% import '_parts/icons.html.twig' as ui %}
 <!DOCTYPE html>
-<html lang="lt" data-theme="dark">
+<html lang="{{ app.request.locale }}" data-theme="dark" data-copied="{{ 'common.copied'|trans }}" data-copy-prompt="{{ 'common.copy_prompt'|trans }}" data-billion="{{ 'format.billion'|trans }}">
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -18,45 +18,46 @@
                 <aside class="sidebar" id="sidebar">
                     <a class="brand" href="{{ path('app_dashboard') }}"><span class="brand-mark">+</span> CLIProxy hub</a>
                     <nav>
-                        <a href="{{ path('app_dashboard') }}" class="{{ route == 'app_dashboard' ? 'active' }}">{{ ui.icon('dashboard') }} Apžvalga</a>
-                        <a href="{{ path('app_quota') }}" class="{{ route == 'app_quota' ? 'active' }}">{{ ui.icon('quota') }} Kvotos</a>
-                        <a href="{{ path('app_accounts') }}" class="{{ route starts with 'app_accounts' ? 'active' }}">{{ ui.icon('accounts') }} Paskyros</a>
-                        <a href="{{ path('app_usage') }}" class="{{ route == 'app_usage' ? 'active' }}">{{ ui.icon('usage') }} Naudojimas</a>
-                        <div class="nav-group">Srautas</div>
-                        <a href="{{ path('app_traffic') }}" class="{{ route in ['app_traffic', 'app_traffic_show'] ? 'active' }}">{{ ui.icon('traffic') }} Žurnalas</a>
-                        <a href="{{ path('app_traffic_sessions') }}" class="{{ route in ['app_traffic_sessions', 'app_traffic_session'] ? 'active' }}">{{ ui.icon('sessions') }} Sesijos</a>
-                        <a href="{{ path('app_traffic_analysis') }}" class="{{ route == 'app_traffic_analysis' ? 'active' }}">{{ ui.icon('analysis') }} Analizė</a>
-                        <div class="nav-group">Hub'as</div>
-                        <a href="{{ path('app_settings') }}" class="{{ route == 'app_settings' ? 'active' }}">{{ ui.icon('settings') }} Nustatymai</a>
-                        <a href="{{ path('app_connect') }}" class="{{ route == 'app_connect' ? 'active' }}">{{ ui.icon('connect') }} Prijungimas</a>
+                        <a href="{{ path('app_dashboard') }}" class="{{ route == 'app_dashboard' ? 'active' }}">{{ ui.icon('dashboard') }} {{ 'nav.dashboard'|trans }}</a>
+                        <a href="{{ path('app_quota') }}" class="{{ route == 'app_quota' ? 'active' }}">{{ ui.icon('quota') }} {{ 'nav.quota'|trans }}</a>
+                        <a href="{{ path('app_accounts') }}" class="{{ route starts with 'app_accounts' ? 'active' }}">{{ ui.icon('accounts') }} {{ 'nav.accounts'|trans }}</a>
+                        <a href="{{ path('app_usage') }}" class="{{ route == 'app_usage' ? 'active' }}">{{ ui.icon('usage') }} {{ 'nav.usage'|trans }}</a>
+                        <div class="nav-group">{{ 'nav.traffic_group'|trans }}</div>
+                        <a href="{{ path('app_traffic') }}" class="{{ route in ['app_traffic', 'app_traffic_show'] ? 'active' }}">{{ ui.icon('traffic') }} {{ 'nav.traffic'|trans }}</a>
+                        <a href="{{ path('app_traffic_sessions') }}" class="{{ route in ['app_traffic_sessions', 'app_traffic_session'] ? 'active' }}">{{ ui.icon('sessions') }} {{ 'nav.sessions'|trans }}</a>
+                        <a href="{{ path('app_traffic_analysis') }}" class="{{ route == 'app_traffic_analysis' ? 'active' }}">{{ ui.icon('analysis') }} {{ 'nav.analysis'|trans }}</a>
+                        <div class="nav-group">{{ 'nav.hub_group'|trans }}</div>
+                        <a href="{{ path('app_settings') }}" class="{{ route == 'app_settings' ? 'active' }}">{{ ui.icon('settings') }} {{ 'nav.settings'|trans }}</a>
+                        <a href="{{ path('app_connect') }}" class="{{ route == 'app_connect' ? 'active' }}">{{ ui.icon('connect') }} {{ 'nav.connect'|trans }}</a>
                         {% set hub = hub_status() %}
-                        <a href="{{ path('app_alerts') }}" class="{{ route == 'app_alerts' ? 'active' }}">{{ ui.icon('alert') }} Įspėjimai{% if hub.errors + hub.warnings > 0 %}<span class="nav-badge {{ hub.errors == 0 ? 'warn' }}">{{ hub.errors + hub.warnings }}</span>{% endif %}</a>
+                        <a href="{{ path('app_alerts') }}" class="{{ route == 'app_alerts' ? 'active' }}">{{ ui.icon('alert') }} {{ 'nav.alerts'|trans }}{% if hub.errors + hub.warnings > 0 %}<span class="nav-badge {{ hub.errors == 0 ? 'warn' }}">{{ hub.errors + hub.warnings }}</span>{% endif %}</a>
                     </nav>
                     <div class="sidebar-foot">
                         <span>CLIProxyAPI {{ hub.version ?? '–' }}</span>
-                        {% if hub.latest %}<a class="update" href="{{ path('app_alerts') }}">yra {{ hub.latest }}</a>{% endif %}
-                        <span class="{{ hub.collectorStale ? 'bad' }}">kolektorius {{ hub.collectorSeen|ago }}</span>
+                        {% if hub.latest %}<a class="update" href="{{ path('app_alerts') }}">{{ 'layout.update_available'|trans({'%version%': hub.latest}) }}</a>{% endif %}
+                        <span class="{{ hub.collectorStale ? 'bad' }}">{{ 'layout.collector_seen'|trans({'%ago%': hub.collectorSeen|ago}) }}</span>
                     </div>
                 </aside>
                 <div class="content">
                     <header class="topbar">
-                        <button type="button" class="icon-button menu-button" data-toggle-sidebar title="Meniu">{{ ui.icon('menu') }}</button>
+                        <button type="button" class="icon-button menu-button" data-toggle-sidebar title="{{ 'layout.menu'|trans }}">{{ ui.icon('menu') }}</button>
                         <div class="topbar-title">{{ block('title') }}</div>
                         <div class="topbar-actions">
-                            <button type="button" class="icon-button" data-reload title="Atnaujinti">{{ ui.icon('refresh') }}</button>
-                            <button type="button" class="icon-button" data-toggle-emails title="Rodyti / slėpti el. paštus">{{ ui.icon('eye') }}</button>
-                            <button type="button" class="icon-button" data-toggle-theme title="Šviesi / tamsi tema">{{ ui.icon('theme') }}</button>
+                            {{ _self.language_switch() }}
+                            <button type="button" class="icon-button" data-reload title="{{ 'layout.reload'|trans }}">{{ ui.icon('refresh') }}</button>
+                            <button type="button" class="icon-button" data-toggle-emails title="{{ 'layout.toggle_emails'|trans }}">{{ ui.icon('eye') }}</button>
+                            <button type="button" class="icon-button" data-toggle-theme title="{{ 'layout.toggle_theme'|trans }}">{{ ui.icon('theme') }}</button>
                             <form method="post" action="{{ path('app_logout') }}">
                                 <input type="hidden" name="_csrf_token" value="{{ csrf_token('logout') }}">
-                                <button type="submit" class="icon-button" title="Atsijungti">{{ ui.icon('logout') }}</button>
+                                <button type="submit" class="icon-button" title="{{ 'layout.logout'|trans }}">{{ ui.icon('logout') }}</button>
                             </form>
                         </div>
                     </header>
                     <main class="{% block main_class %}page{% endblock %}">
                         {% if hub.collectorStale %}
-                            <div class="flash flash-error banner" role="alert"><strong>Kolektorius neveikia</strong> (paskutinis paleidimas {{ hub.collectorSeen|ago }}): usage, žurnalas ir limitai nesirenka. Tikrink cron konteinerį (<code>docker logs cliproxy-&lt;env&gt;-cron</code>).</div>
+                            <div class="flash flash-error banner" role="alert">{{ 'layout.collector_stale_html'|trans({'%ago%': hub.collectorSeen|ago|e})|raw }}</div>
                         {% elseif hub.collectorError %}
-                            <div class="flash flash-notice" role="status"><strong>Kolektoriaus klaida:</strong> {{ hub.collectorError }}</div>
+                            <div class="flash flash-notice" role="status"><strong>{{ 'layout.collector_error'|trans }}</strong> {{ hub.collectorError }}</div>
                         {% endif %}
                         {% include '_parts/flashes.html.twig' %}
                         {% block body %}{% endblock %}
@@ -65,9 +66,19 @@
             </div>
         {% else %}
             <main class="{{ block('main_class') }}">
+                {{ _self.language_switch() }}
                 {% include '_parts/flashes.html.twig' %}
                 {{ block('body') }}
             </main>
         {% endif %}
     </body>
 </html>
+
+{# LT | EN: the language of the dashboard, remembered in this browser (LocaleController). #}
+{% macro language_switch() %}
+    <nav class="lang-switch" aria-label="{{ 'layout.language'|trans }}">
+        {%- for locale in ['lt', 'en'] -%}
+            <a href="{{ path('app_locale', {locale: locale}) }}" class="{{ app.request.locale == locale ? 'active' }}" hreflang="{{ locale }}" lang="{{ locale }}">{{ locale|upper }}</a>
+        {%- endfor -%}
+    </nav>
+{% endmacro %}

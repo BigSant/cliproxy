@@ -1,5 +1,5 @@
 <div class="segmented">
     {% for key, item in ranges %}
-        <a href="{{ path(app.request.attributes.get('_route'), app.request.query.all|merge({range: key, page: null})) }}" class="{{ key == range ? 'active' }}">{{ item[1] }}</a>
+        <a href="{{ path(app.request.attributes.get('_route'), app.request.query.all|merge({range: key, page: null})) }}" class="{{ key == range ? 'active' }}">{{ item[1]|trans }}</a>
     {% endfor %}
 </div>

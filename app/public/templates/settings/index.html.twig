@@ -1,73 +1,68 @@
 {% extends 'base.html.twig' %}
 
-{% block title %}Nustatymai{% endblock %}
+{% block title %}{{ 'nav.settings'|trans }}{% endblock %}
 
 {% block body %}
-    <h1>Nustatymai</h1>
+    <h1>{{ 'nav.settings'|trans }}</h1>
     <div class="grid-2">
         <section class="card">
-            <h2>Maršrutizavimas</h2>
+            <h2>{{ 'settings.routing'|trans }}</h2>
             <form method="post" action="{{ path('app_settings_routing') }}" class="stack">
                 <input type="hidden" name="_token" value="{{ csrf_token('settings') }}">
-                <label>Strategija
+                <label>{{ 'settings.strategy_label'|trans }}
                     <select name="strategy">
-                        {% for key, label in strategies %}<option value="{{ key }}" {{ key == strategy ? 'selected' }}>{{ label }}</option>{% endfor %}
+                        {% for key, label in strategies %}<option value="{{ key }}" {{ key == strategy ? 'selected' }}>{{ label|trans }}</option>{% endfor %}
                     </select>
                 </label>
-                <label class="check"><input type="checkbox" name="affinity" value="1" {{ affinity ? 'checked' }}> Session affinity – sesija lieka savo paskyroje (cache priklauso paskyrai)</label>
+                <label class="check"><input type="checkbox" name="affinity" value="1" {{ affinity ? 'checked' }}> {{ 'settings.affinity'|trans }}</label>
                 <label>Affinity TTL <input type="text" name="affinity_ttl" value="{{ affinityTtl }}" pattern="\d+(s|m|h)" required></label>
-                <label>Pakartojimai nepavykus <input type="number" name="request_retry" value="{{ requestRetry }}" min="0" max="10"></label>
-                {% if not usageEnabled %}<p class="bad small">Usage statistika CLIProxyAPI išjungta – išsaugojus įsijungs.</p>{% endif %}
-                <button class="button primary">Išsaugoti</button>
+                <label>{{ 'settings.retries'|trans }} <input type="number" name="request_retry" value="{{ requestRetry }}" min="0" max="10"></label>
+                {% if not usageEnabled %}<p class="bad small">{{ 'settings.usage_off'|trans }}</p>{% endif %}
+                <button class="button primary">{{ 'common.save'|trans }}</button>
             </form>
         </section>
 
         <section class="card">
             <h2>Soonest-reset-first</h2>
-            <p class="muted">CLIProxyAPI pirmiau naudoja didesnio prioriteto paskyras. Įjungus, hub'as po kiekvieno limitų skaitymo
-                didžiausią prioritetą duoda paskyrai, kurios savaitinis limitas atsinaujina anksčiausiai (jos tokenai kitaip pradingtų),
-                o išnaudotoms – 0. Rankiniai prioritetai tada perrašomi.</p>
+            <p class="muted">{{ 'settings.auto_priority_explain'|trans }}</p>
             <form method="post" action="{{ path('app_settings_dashboard') }}" class="stack">
                 <input type="hidden" name="_token" value="{{ csrf_token('settings') }}">
-                <label class="check"><input type="checkbox" name="auto_priority" value="1" {{ autoPriority ? 'checked' }}> Įjungti soonest-reset-first</label>
-                <label>Limitus skaityti kas (min.) <input type="number" name="refresh_minutes" value="{{ refreshMinutes }}" min="1" max="60"></label>
-                <button class="button primary">Išsaugoti</button>
+                <label class="check"><input type="checkbox" name="auto_priority" value="1" {{ autoPriority ? 'checked' }}> {{ 'settings.auto_priority'|trans }}</label>
+                <label>{{ 'settings.refresh_minutes'|trans }} <input type="number" name="refresh_minutes" value="{{ refreshMinutes }}" min="1" max="60"></label>
+                <button class="button primary">{{ 'common.save'|trans }}</button>
             </form>
         </section>
     </div>
 
     <section class="card" id="ntfy">
-        <h2>Pranešimai į telefoną</h2>
-        <p class="muted"><a href="{{ path('app_alerts') }}">Įspėjimai</a> (reikia prisijungti iš naujo, nėra laisvos paskyros, CLIProxyAPI neatsako, baigiasi vieta diske)
-            siunčiami per <a href="https://ntfy.sh" target="_blank" rel="noopener noreferrer">ntfy</a>: įdiek programėlę, užsiprenumeruok sunkiai atspėjamą temą ir įrašyk jos adresą.</p>
+        <h2>{{ 'settings.ntfy'|trans }}</h2>
+        <p class="muted">{{ 'settings.ntfy_explain_html'|trans({'%alerts_url%': path('app_alerts')|e})|raw }}</p>
         <form method="post" action="{{ path('app_settings_ntfy') }}" class="inline-form">
             <input type="hidden" name="_token" value="{{ csrf_token('settings') }}">
             <input type="url" name="ntfy_url" value="{{ ntfyUrl }}" placeholder="https://ntfy.sh/cliproxy-hub-…">
-            <button class="button primary">Išsaugoti</button>
+            <button class="button primary">{{ 'common.save'|trans }}</button>
         </form>
     </section>
 
     <section class="card">
-        <h2>Srauto žurnalas</h2>
-        <p class="muted">Kiekviena užklausa ir atsakymas (prompt'as, mąstymas, atsakymas, įrankių kvietimai ir jų rezultatai, tokenai, būsena)
-            patenka į <a href="{{ path('app_traffic') }}">Žurnalą</a>, žalias CLIProxyAPI log'as – suspaustas į archyvą. Niekas automatiškai netrinama.
-            Juose – visas tavo kodas ir pokalbiai: jie lieka tik šiame kompiuteryje.</p>
+        <h2>{{ 'settings.traffic'|trans }}</h2>
+        <p class="muted">{{ 'settings.traffic_explain_html'|trans({'%journal_url%': path('app_traffic')|e})|raw }}</p>
         <form method="post" action="{{ path('app_settings_traffic') }}" class="stack">
             <input type="hidden" name="_token" value="{{ csrf_token('settings') }}">
-            <label class="check"><input type="checkbox" name="request_log" value="1" {{ requestLog ? 'checked' }}> Registruoti visą srautą (CLIProxyAPI <code>request-log</code>)</label>
-            <button class="button primary">Išsaugoti</button>
+            <label class="check"><input type="checkbox" name="request_log" value="1" {{ requestLog ? 'checked' }}> {{ 'settings.request_log_html'|trans|raw }}</label>
+            <button class="button primary">{{ 'common.save'|trans }}</button>
         </form>
     </section>
 
     <section class="card">
         <div class="card-head">
             <div>
-                <h2>Klientų raktai</h2>
-                <p class="muted">Juos siunčia Claude Code (<code>ANTHROPIC_AUTH_TOKEN</code>) ir Codex (<code>experimental_bearer_token</code>).</p>
+                <h2>{{ 'settings.keys'|trans }}</h2>
+                <p class="muted">{{ 'settings.keys_explain_html'|trans|raw }}</p>
             </div>
             <form method="post" action="{{ path('app_settings_keys_add') }}">
                 <input type="hidden" name="_token" value="{{ csrf_token('settings') }}">
-                <button class="button">+ Naujas raktas</button>
+                <button class="button">{{ 'settings.new_key'|trans }}</button>
             </form>
         </div>
         <table>
@@ -76,17 +71,17 @@
                     <tr>
                         <td><code class="secret" data-secret="{{ key }}">{{ key|slice(0, 6) }}…{{ key|slice(-4) }}</code></td>
                         <td class="actions-cell">
-                            <button type="button" class="button small" data-reveal>Rodyti</button>
-                            <button type="button" class="button small" data-copy="{{ key }}">Kopijuoti</button>
-                            <form method="post" action="{{ path('app_settings_keys_delete') }}" data-confirm="Ištrinti raktą? Jį naudojantys kompiuteriai nebegalės jungtis.">
+                            <button type="button" class="button small" data-reveal>{{ 'settings.reveal'|trans }}</button>
+                            <button type="button" class="button small" data-copy="{{ key }}">{{ 'common.copy'|trans }}</button>
+                            <form method="post" action="{{ path('app_settings_keys_delete') }}" data-confirm="{{ 'settings.delete_key_confirm'|trans }}">
                                 <input type="hidden" name="_token" value="{{ csrf_token('settings') }}">
                                 <input type="hidden" name="key" value="{{ key }}">
-                                <button class="button small danger">Ištrinti</button>
+                                <button class="button small danger">{{ 'settings.delete_key'|trans }}</button>
                             </form>
                         </td>
                     </tr>
                 {% else %}
-                    <tr><td class="bad">Raktų nėra – hub'as priima bet kokią užklausą.</td></tr>
+                    <tr><td class="bad">{{ 'settings.no_keys'|trans }}</td></tr>
                 {% endfor %}
             </tbody>
         </table>
@@ -94,13 +89,13 @@
 
     <section class="card">
         <h2>config.yaml</h2>
-        <p class="muted">Visa CLIProxyAPI konfigūracija. Pakeitimai įsigalioja iš karto (CLIProxyAPI perkrauna failą pats).</p>
-        <form method="post" action="{{ path('app_settings_yaml') }}" class="stack" data-confirm="Išsaugoti config.yaml? Klaida jame gali sustabdyti proxy.">
+        <p class="muted">{{ 'settings.yaml_explain'|trans }}</p>
+        <form method="post" action="{{ path('app_settings_yaml') }}" class="stack" data-confirm="{{ 'settings.yaml_confirm'|trans }}">
             <input type="hidden" name="_token" value="{{ csrf_token('settings') }}">
             <input type="hidden" name="etag" value="{{ etag }}">
             <textarea name="yaml" rows="24" spellcheck="false" class="code">{{ yaml }}</textarea>
-            <p class="muted small">Klientų raktai rodomi kaip <code>&lt;raktas-N&gt;</code>; saugant grąžinami tikri. Jei failas pasikeitė, kol redagavai, išsaugojimas atmetamas.</p>
-            <button class="button">Išsaugoti config.yaml</button>
+            <p class="muted small">{{ 'settings.yaml_note_html'|trans|raw }}</p>
+            <button class="button">{{ 'settings.yaml_save'|trans }}</button>
         </form>
     </section>
 {% endblock %}

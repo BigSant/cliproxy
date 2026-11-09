@@ -4,5 +4,5 @@
         {% endfor %}
     {% endfor %}
     {% if error is defined and error %}
-        <div class="flash flash-error" role="alert"><strong>CLIProxyAPI nepasiekiamas.</strong> {{ error }}</div>
+        <div class="flash flash-error" role="alert"><strong>{{ 'layout.cliproxy_unreachable'|trans }}</strong> {{ error }}</div>
     {% endif %}

@@ -30,6 +30,15 @@ class Alert
     public ?\DateTimeImmutable $resolvedAt = null;
     #[ORM\Column(type: 'utc_datetime_immutable', nullable: true)]
     public ?\DateTimeImmutable $notifiedAt = null;
+    /**
+     * The message as a translation key and its parameters, which a page shows in its own language; message keeps it
+     * in the default one (what ntfy got, and all an alert from before the keys has).
+     */
+    #[ORM\Column(length: 190, nullable: true)]
+    public ?string $messageKey = null;
+    /** @var array<string, string|int>|null */
+    #[ORM\Column(type: 'json', nullable: true)]
+    public ?array $messageParams = null;
 
     public function __construct(
         #[ORM\Column(length: 190)]

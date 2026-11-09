@@ -1,15 +1,15 @@
 {% extends 'base.html.twig' %}
 
-{% block title %}Sesija{% endblock %}
+{% block title %}{{ 'common.session'|trans }}{% endblock %}
 
 {% block body %}
     {% set first = exchanges|first %}
     {% set last = exchanges|last %}
     <div class="page-head">
         <div class="title-line">
-            <h1>Sesija</h1>
+            <h1>{{ 'common.session'|trans }}</h1>
             <code>{{ sessionId }}</code>
-            <span class="muted">{{ first.occurredAt|date('m-d H:i') }} – {{ last.occurredAt|date('H:i') }} · {{ exchanges|length }} užklausos</span>
+            <span class="muted">{{ first.occurredAt|date('m-d H:i') }} – {{ last.occurredAt|date('H:i') }} · {{ 'traffic.session.requests'|trans({'%count%': exchanges|length}) }}</span>
         </div>
         <a class="button" href="{{ path('app_traffic_export', {session: sessionId, range: '90d'}) }}">JSONL</a>
     </div>
@@ -19,11 +19,11 @@
                 <div class="timeline-meta">
                     <a href="{{ path('app_traffic_show', {id: exchange.id}) }}">{{ exchange.occurredAt|date('H:i:s') }}</a>
                     {% include 'traffic/_status.html.twig' %}
-                    <span class="muted small">{{ exchange.model }}{{ exchange.reasoningEffort ? ' ' ~ exchange.reasoningEffort }} · {{ (exchange.durationMs / 1000)|number_format(1, ',') }} s · {{ exchange.outputTokens|tokens }} išv.</span>
+                    <span class="muted small">{{ exchange.model }}{{ exchange.reasoningEffort ? ' ' ~ exchange.reasoningEffort }} · {{ (exchange.durationMs / 1000)|decimal(1) }} s · {{ 'traffic.session.output_short'|trans({'%tokens%': exchange.outputTokens|tokens}) }}</span>
                 </div>
                 {% if exchange.promptKind == 'user' %}<div class="bubble bubble-user">{{ exchange.prompt|u.truncate(600, '…') }}</div>{% endif %}
-                {% if exchange.promptKind == 'agent' %}<div class="bubble bubble-agent"><span class="kind kind-agent">agentas</span> {{ exchange.prompt|u.truncate(600, '…') }}</div>{% endif %}
-                {% if exchange.toolErrorCount %}<div class="bad small">{{ exchange.toolErrorCount }} įrankių rezultatai su klaida</div>{% endif %}
+                {% if exchange.promptKind == 'agent' %}<div class="bubble bubble-agent"><span class="kind kind-agent">{{ 'traffic.agent'|trans }}</span> {{ exchange.prompt|u.truncate(600, '…') }}</div>{% endif %}
+                {% if exchange.toolErrorCount %}<div class="bad small">{{ 'traffic.session.tool_errors'|trans({'%count%': exchange.toolErrorCount}) }}</div>{% endif %}
                 {% if exchange.thinking %}<div class="bubble bubble-think">{{ exchange.thinking|u.truncate(300, '…') }}</div>{% endif %}
                 {% if exchange.answer %}<div class="bubble">{{ exchange.answer|u.truncate(600, '…') }}</div>{% endif %}
                 {% if exchange.toolCalls is not empty %}
@@ -33,7 +33,7 @@
                         {% endfor %}
                     </div>
                 {% endif %}
-                {% if exchange.error %}<div class="bad small">{{ exchange.error|u.truncate(300, '…') }}</div>{% endif %}
+                {% if exchange.error %}<div class="bad small">{{ exchange.error|exchange_error|u.truncate(300, '…') }}</div>{% endif %}
             </li>
         {% endfor %}
     </ol>

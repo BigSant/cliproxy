@@ -7,12 +7,13 @@ use Doctrine\DBAL\Connection;
 use Psr\Clock\ClockInterface;
 use Symfony\Component\DependencyInjection\Attribute\Autowire;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
+use Symfony\Contracts\Translation\TranslatorInterface;
 
 /**
  * The alert that must not depend on what it watches (app:watchdog, its own cron line every five minutes): the
  * collector stopped, the database or CLIProxyAPI not answering. It reads plain files the collector leaves in the
  * traffic directory (.heartbeat, .ntfy – the topic copied from the settings), pushes to ntfy itself and remembers what
- * it told in .watchdog-state. No entity manager, no lock.
+ * it told in .watchdog-state. No entity manager, no lock. It speaks the default language (watchdog.* in translations/).
  */
 class Watchdog
 {
@@ -27,6 +28,9 @@ class Watchdog
         private readonly ManagementClient $client,
         private readonly HttpClientInterface $httpClient,
         private readonly ClockInterface $clock,
+        private readonly TranslatorInterface $translator,
+        #[Autowire('%kernel.default_locale%')]
+        private readonly string $defaultLocale,
     ) {
         $this->directory = \dirname($archiveDirectory);
     }
@@ -52,15 +56,15 @@ class Watchdog
         $problems = [];
         $beat = @file_get_contents($this->directory.'/.heartbeat');
         if (false === $beat || $this->clock->now()->getTimestamp() - (int) $beat > self::STALE_SECONDS) {
-            $problems['collector'] = 'Kolektorius neveikia: usage, žurnalas ir limitai nesirenka.';
+            $problems['collector'] = $this->text('watchdog.collector');
         }
         try {
             $this->connection->executeQuery('SELECT 1');
         } catch (\Throwable) {
-            $problems['database'] = 'Hub\'o duomenų bazė neatsako.';
+            $problems['database'] = $this->text('watchdog.database');
         }
         if (null === $this->client->version()) {
-            $problems['cliproxy'] = 'CLIProxyAPI neatsako – Claude Code ir Codex per hub\'ą neveikia.';
+            $problems['cliproxy'] = $this->text('watchdog.cliproxy');
         }
 
         return $problems;
@@ -82,7 +86,7 @@ class Watchdog
             }
         }
         foreach (array_keys($told) as $key) {
-            if (!isset($problems[$key]) && $this->push($topic, 'Vėl veikia: '.$key, false)) {
+            if (!isset($problems[$key]) && $this->push($topic, $this->text('watchdog.resolved', ['%problem%' => $key]), false)) {
                 unset($told[$key]);
                 $pushed[$key] = 'resolved';
             }
@@ -92,6 +96,12 @@ class Watchdog
         }
 
         return $pushed;
+    }
+
+    /** @param array<string, string> $parameters */
+    private function text(string $id, array $parameters = []): string
+    {
+        return $this->translator->trans($id, $parameters, null, $this->defaultLocale);
     }
 
     private function push(string $topic, string $message, bool $problem): bool

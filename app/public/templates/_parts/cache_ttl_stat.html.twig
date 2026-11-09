@@ -3,12 +3,12 @@
 {% set ttl_writes = totals.cache_5m + totals.cache_1h %}
 {% set ttl_short = ttl_writes > 0 and totals.cache_5m > totals.cache_1h %}
 <div class="stat {{ ttl_short ? 'stat-warn' }}">
-    <div class="stat-label">Cache rašymai 1 val. / 5 min.</div>
+    <div class="stat-label">{{ 'cache_ttl.label'|trans }}</div>
     {% if ttl_writes > 0 %}
-        <div class="stat-value">{{ totals.cache_1h|share(ttl_writes) }}<span class="muted"> 1 val.</span></div>
-        <div class="stat-sub">{% if ttl_short %}daugiausia 5 min. – klientams trūksta <a href="{{ path('app_connect') }}"><code>promptCacheTtl</code></a>{% else %}5 min.: {{ totals.cache_5m|tokens }} · 1 val.: {{ totals.cache_1h|tokens }}{% endif %}</div>
+        <div class="stat-value">{{ totals.cache_1h|share(ttl_writes) }}<span class="muted">{{ 'cache_ttl.hour'|trans }}</span></div>
+        <div class="stat-sub">{% if ttl_short %}{{ 'cache_ttl.short_html'|trans({'%url%': path('app_connect')|e})|raw }}{% else %}{{ 'cache_ttl.split'|trans({'%short%': totals.cache_5m|tokens, '%long%': totals.cache_1h|tokens}) }}{% endif %}</div>
     {% else %}
         <div class="stat-value muted">–</div>
-        <div class="stat-sub">Claude cache rašymų dar nėra</div>
+        <div class="stat-sub">{{ 'cache_ttl.none'|trans }}</div>
     {% endif %}
 </div>

@@ -1,6 +1,6 @@
 {# One limit window: a bar of the used share and when it starts over. #}
 {% if window %}
-    <div class="quota quota-{{ window.used|level }}" title="{{ window.label }}: {{ window.used|number_format(0) }} %{% if window.resetsAt %}, atsinaujina {{ window.resetsAt|date('Y-m-d H:i') }}{% endif %}">
+    <div class="quota quota-{{ window.used|level }}" title="{{ window|window_label }}: {{ 'format.percent'|trans({'%value%': window.used|decimal}) }}{% if window.resetsAt %}{{ 'quota_bar.resets'|trans({'%at%': window.resetsAt|date('Y-m-d H:i')}) }}{% endif %}">
         <div class="quota-line">
             <span class="quota-value">{{ window.used|number_format(0) }}%</span>
             <span class="quota-reset">{{ window.resetsAt|until }}</span>

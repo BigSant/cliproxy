@@ -1,16 +1,16 @@
 {# The outcome of one exchange as a tag. #}
 {% if exchange.failed %}
-    <span class="tag tag-bad" title="{{ exchange.error }}">HTTP {{ exchange.statusCode ?: '–' }}</span>
+    <span class="tag tag-bad" title="{{ exchange.error|exchange_error }}">HTTP {{ exchange.statusCode ?: '–' }}</span>
 {% elseif exchange.promptKind in ['user', 'agent'] %}
     {# A prompt starts the work; what the model did with it is in the tools column and the next rows. #}
-    <span class="tag tag-prompt" title="Nauja užklausa ({{ exchange.promptKind == 'user' ? 'žmogaus' : 'agento' }}); modelis {{ exchange.stopReason in ['tool_use'] or exchange.toolCallCount > 0 ? 'atsakė įrankio kvietimu' : 'iškart atsakė' }}">užklausa</span>
-    {% if not (exchange.stopReason in ['tool_use'] or exchange.toolCallCount > 0) and exchange.stopReason in ['end_turn', 'completed', 'stop_sequence'] %}<span class="tag tag-ok">atsakė</span>{% endif %}
+    <span class="tag tag-prompt" title="{{ 'traffic.status.prompt_title'|trans({'%who%': (exchange.promptKind == 'user' ? 'traffic.status.by_human' : 'traffic.status.by_agent')|trans, '%what%': (exchange.stopReason in ['tool_use'] or exchange.toolCallCount > 0 ? 'traffic.status.answered_with_tool' : 'traffic.status.answered_at_once')|trans}) }}">{{ 'traffic.status.prompt'|trans }}</span>
+    {% if not (exchange.stopReason in ['tool_use'] or exchange.toolCallCount > 0) and exchange.stopReason in ['end_turn', 'completed', 'stop_sequence'] %}<span class="tag tag-ok">{{ 'traffic.status.answered'|trans }}</span>{% endif %}
 {% elseif exchange.stopReason in ['tool_use'] or exchange.toolCallCount > 0 %}
-    <span class="tag tag-info" title="Modelis atsakė įrankio kvietimu ({{ exchange.stopReason ?: 'tool_use' }}); darbas tęsiasi kitoje užklausoje">kviečia įrankį</span>
+    <span class="tag tag-info" title="{{ 'traffic.status.calls_tool_title'|trans({'%reason%': exchange.stopReason ?: 'tool_use'}) }}">{{ 'traffic.status.calls_tool'|trans }}</span>
 {% elseif exchange.stopReason in ['max_tokens', 'incomplete: max_output_tokens'] %}
-    <span class="tag tag-warn">nukirsta</span>
+    <span class="tag tag-warn">{{ 'traffic.status.cut_off'|trans }}</span>
 {% elseif exchange.stopReason in ['end_turn', 'completed', 'stop_sequence'] %}
-    <span class="tag tag-ok" title="Galutinis atsakymas ({{ exchange.stopReason }})">atsakė</span>
+    <span class="tag tag-ok" title="{{ 'traffic.status.final_title'|trans({'%reason%': exchange.stopReason}) }}">{{ 'traffic.status.answered'|trans }}</span>
 {% else %}
     <span class="tag tag-ok">{{ exchange.stopReason ?: 'ok' }}</span>
 {% endif %}

@@ -1,38 +1,37 @@
 {% extends 'base.html.twig' %}
 
-{% block title %}Paskyros{% endblock %}
+{% block title %}{{ 'nav.accounts'|trans }}{% endblock %}
 
 {% block body %}
     <section class="card">
         <div class="card-head">
             <div>
-                <h1>Prijungti paskyrą</h1>
-                <p class="muted">Prisijungimas vyksta tavo naršyklėje; hub'as gauna tik raktą. Claude prenumeratą naudok tik per Claude Code.</p>
+                <h1>{{ 'accounts.connect'|trans }}</h1>
+                <p class="muted">{{ 'accounts.connect_note'|trans }}</p>
             </div>
         </div>
         {% if login %}
             <ol class="steps">
                 <li>
-                    <strong>Atidaryk {{ providers[login.provider] }} prisijungimą</strong> ir prisijunk {{ login.relogin is defined ? 'ta pačia paskyra (' ~ login.relogin ~ ')' : 'paskyra, kurią nori pridėti' }}:
+                    <strong>{{ 'accounts.login.open'|trans({'%provider%': providers[login.provider]}) }}</strong> {{ login.relogin is defined ? 'accounts.login.sign_in_same'|trans({'%account%': login.relogin}) : 'accounts.login.sign_in_new'|trans }}
                     <div class="copy-row">
-                        <a class="button primary" href="{{ login.url }}" target="_blank" rel="noopener noreferrer">Atidaryti {{ providers[login.provider] }}</a>
-                        <button type="button" class="button" data-copy="{{ login.url }}">Kopijuoti nuorodą</button>
+                        <a class="button primary" href="{{ login.url }}" target="_blank" rel="noopener noreferrer">{{ 'accounts.login.open_button'|trans({'%provider%': providers[login.provider]}) }}</a>
+                        <button type="button" class="button" data-copy="{{ login.url }}">{{ 'accounts.login.copy_link'|trans }}</button>
                     </div>
                 </li>
                 <li>
-                    <strong>Naršyklė baigs adresu <code>{{ login.provider == 'claude' ? 'http://localhost:54545/callback?…' : 'http://localhost:1455/auth/callback?…' }}</code></strong>,
-                    kuris neatsidarys – taip ir turi būti. Nukopijuok visą adresą iš adreso juostos:
+                    <strong>{{ 'accounts.login.ends_at'|trans }} <code>{{ login.provider == 'claude' ? 'http://localhost:54545/callback?…' : 'http://localhost:1455/auth/callback?…' }}</code></strong>{{ 'accounts.login.paste'|trans }}
                     <form method="post" action="{{ path('app_accounts_login_callback') }}" class="inline-form">
                         <input type="hidden" name="_token" value="{{ csrf_token('accounts') }}">
                         <input type="url" name="redirect_url" placeholder="http://localhost:…/callback?code=…&amp;state=…" required>
-                        <button class="button primary">Prijungti</button>
+                        <button class="button primary">{{ 'accounts.login.submit'|trans }}</button>
                     </form>
                 </li>
             </ol>
             <form method="post" action="{{ path('app_accounts_login_cancel') }}">
                 <input type="hidden" name="_token" value="{{ csrf_token('accounts') }}">
-                <button class="link">Atšaukti</button>
-                <span class="muted">Prisijungimas galioja 30 min.</span>
+                <button class="link">{{ 'accounts.login.cancel'|trans }}</button>
+                <span class="muted">{{ 'accounts.login.valid_for'|trans }}</span>
             </form>
         {% else %}
             <div class="provider-buttons">
@@ -40,7 +39,7 @@
                     <form method="post" action="{{ path('app_accounts_login_start') }}">
                         <input type="hidden" name="_token" value="{{ csrf_token('accounts') }}">
                         <input type="hidden" name="provider" value="{{ key }}">
-                        <button class="button provider-button provider-{{ key }}">+ {{ label }} paskyra</button>
+                        <button class="button provider-button provider-{{ key }}">{{ 'accounts.login.add'|trans({'%provider%': label}) }}</button>
                     </form>
                 {% endfor %}
             </div>
@@ -49,10 +48,10 @@
 
     <section class="card">
         <div class="card-head">
-            <h2>Paskyros</h2>
+            <h2>{{ 'accounts.list'|trans }}</h2>
             <form method="post" action="{{ path('app_accounts_quotas') }}">
                 <input type="hidden" name="_token" value="{{ csrf_token('accounts') }}">
-                <button class="button">Perskaityti limitus</button>
+                <button class="button">{{ 'accounts.read_limits'|trans }}</button>
             </form>
         </div>
         {% for row in rows %}
@@ -63,7 +62,7 @@
                     <div class="account-quotas">
                         {% for key in ['5h', '7d', '7d-fable'] %}
                             {% if row.windows[key] is defined %}
-                                <div><span class="muted small">{{ row.windows[key].label }}</span>{% include '_parts/quota.html.twig' with {window: row.windows[key]} %}</div>
+                                <div><span class="muted small">{{ row.windows[key]|window_label }}</span>{% include '_parts/quota.html.twig' with {window: row.windows[key]} %}</div>
                             {% endif %}
                         {% endfor %}
                     </div>
@@ -72,64 +71,64 @@
                     <form method="post" action="{{ path('app_accounts_fields') }}" class="fields">
                         <input type="hidden" name="_token" value="{{ csrf_token('accounts') }}">
                         <input type="hidden" name="name" value="{{ account.name }}">
-                        <label>Prioritetas <input type="number" name="priority" value="{{ account.priority }}" min="0" max="1000"></label>
-                        <label>Svoris <input type="number" name="weight" value="{{ account.weight }}" min="1" max="1000000"></label>
+                        <label>{{ 'accounts.priority'|trans }} <input type="number" name="priority" value="{{ account.priority }}" min="0" max="1000"></label>
+                        <label>{{ 'accounts.weight'|trans }} <input type="number" name="weight" value="{{ account.weight }}" min="1" max="1000000"></label>
                         {% if account.codex %}
                             <input type="hidden" name="websockets_field" value="1">
-                            <label class="check"><input type="checkbox" name="websockets" value="1" {{ account.websockets ? 'checked' }}> WebSocket'ai</label>
+                            <label class="check"><input type="checkbox" name="websockets" value="1" {{ account.websockets ? 'checked' }}> {{ 'accounts.websockets'|trans }}</label>
                         {% endif %}
-                        <label class="grow">Pastaba <input type="text" name="note" value="{{ account.note }}" maxlength="200"></label>
-                        <button class="button">Išsaugoti</button>
+                        <label class="grow">{{ 'accounts.note'|trans }} <input type="text" name="note" value="{{ account.note }}" maxlength="200"></label>
+                        <button class="button">{{ 'common.save'|trans }}</button>
                     </form>
                     <div class="actions">
                         <form method="post" action="{{ path('app_accounts_toggle') }}">
                             <input type="hidden" name="_token" value="{{ csrf_token('accounts') }}">
                             <input type="hidden" name="name" value="{{ account.name }}">
                             <input type="hidden" name="disabled" value="{{ account.disabled ? '0' : '1' }}">
-                            <button class="button">{{ account.disabled ? 'Įjungti' : 'Išjungti' }}</button>
+                            <button class="button">{{ (account.disabled ? 'accounts.enable' : 'accounts.disable')|trans }}</button>
                         </form>
                         <form method="post" action="{{ path('app_accounts_relogin') }}">
                             <input type="hidden" name="_token" value="{{ csrf_token('accounts') }}">
                             <input type="hidden" name="name" value="{{ account.name }}">
                             <input type="hidden" name="provider" value="{{ account.provider }}">
-                            <button class="button {{ account.requiresSignIn ? 'primary' }}">Prisijungti iš naujo</button>
+                            <button class="button {{ account.requiresSignIn ? 'primary' }}">{{ 'accounts.relogin'|trans }}</button>
                         </form>
                         {% if account.cooldowns is not empty %}
                             <form method="post" action="{{ path('app_accounts_cooldown') }}">
                                 <input type="hidden" name="_token" value="{{ csrf_token('accounts') }}">
                                 <input type="hidden" name="auth_index" value="{{ account.authIndex }}">
-                                <button class="button">Atšaukti pauzę</button>
+                                <button class="button">{{ 'accounts.clear_cooldown'|trans }}</button>
                             </form>
                         {% endif %}
                         <form method="post" action="{{ path('app_accounts_refresh') }}">
                             <input type="hidden" name="_token" value="{{ csrf_token('accounts') }}">
                             <input type="hidden" name="name" value="{{ account.name }}">
-                            <button class="button">Atnaujinti raktą</button>
+                            <button class="button">{{ 'accounts.refresh'|trans }}</button>
                         </form>
                         <form method="post" action="{{ path('app_accounts_verify') }}">
                             <input type="hidden" name="_token" value="{{ csrf_token('accounts') }}">
                             <input type="hidden" name="name" value="{{ account.name }}">
-                            <button class="button">Patikrinti</button>
+                            <button class="button">{{ 'accounts.verify'|trans }}</button>
                         </form>
-                        <form method="post" action="{{ path('app_accounts_delete') }}" data-confirm="Pašalinti {{ account.label }} iš hub'o? Prisijungti reikės iš naujo.">
+                        <form method="post" action="{{ path('app_accounts_delete') }}" data-confirm="{{ 'accounts.delete_confirm'|trans({'%account%': account.label}) }}">
                             <input type="hidden" name="_token" value="{{ csrf_token('accounts') }}">
                             <input type="hidden" name="name" value="{{ account.name }}">
-                            <button class="button danger">Pašalinti</button>
+                            <button class="button danger">{{ 'accounts.delete'|trans }}</button>
                         </form>
                     </div>
                     <dl class="facts">
-                        <dt>Failas</dt><dd><code>{{ account.name }}</code></dd>
-                        <dt>Auth index</dt><dd><code>{{ account.authIndex }}</code></dd>
-                        <dt>Raktas atnaujintas</dt><dd>{{ account.lastRefresh|ago }}</dd>
-                        <dt>Limitai</dt><dd>{% if row.snapshot %}{{ row.snapshot.fetchedAt|ago }} ({{ row.snapshot.source == 'live' ? 'iš tiekėjo' : 'iš paskutinio atsakymo antraščių' }}){% if row.snapshot.error %} · <span class="bad">{{ row.snapshot.error }}</span>{% endif %}{% else %}dar neperskaityti{% endif %}</dd>
-                        {% if quotaErrors[account.authIndex] is defined %}<dt>Limitų klaida</dt><dd class="bad">{{ quotaErrors[account.authIndex] }}</dd>{% endif %}
-                        {% if account.statusMessage %}<dt>Būsena</dt><dd>{{ account.statusMessage }}</dd>{% endif %}
-                        {% for cooldown in account.cooldowns %}<dt>Pauzė</dt><dd>{{ cooldown.scope }} {{ cooldown.model }}: {{ cooldown.reason }}, iki {{ cooldown.retryAt ? cooldown.retryAt|date('H:i') : '–' }}</dd>{% endfor %}
+                        <dt>{{ 'accounts.fact.file'|trans }}</dt><dd><code>{{ account.name }}</code></dd>
+                        <dt>{{ 'accounts.fact.auth_index'|trans }}</dt><dd><code>{{ account.authIndex }}</code></dd>
+                        <dt>{{ 'accounts.fact.refreshed'|trans }}</dt><dd>{{ account.lastRefresh|ago }}</dd>
+                        <dt>{{ 'accounts.fact.limits'|trans }}</dt><dd>{% if row.snapshot %}{{ row.snapshot.fetchedAt|ago }} ({{ (row.snapshot.source == 'live' ? 'accounts.fact.from_provider' : 'accounts.fact.from_headers')|trans }}){% if row.snapshot.error %} · <span class="bad">{{ row.snapshot.error }}</span>{% endif %}{% else %}{{ 'accounts.fact.not_read'|trans }}{% endif %}</dd>
+                        {% if quotaErrors[account.authIndex] is defined %}<dt>{{ 'accounts.fact.limit_error'|trans }}</dt><dd class="bad">{{ quotaErrors[account.authIndex] }}</dd>{% endif %}
+                        {% if account.statusMessage %}<dt>{{ 'accounts.fact.status'|trans }}</dt><dd>{{ account.statusMessage }}</dd>{% endif %}
+                        {% for cooldown in account.cooldowns %}<dt>{{ 'accounts.fact.cooldown'|trans }}</dt><dd>{{ cooldown.scope }} {{ cooldown.model }}: {{ cooldown.reason }}, {{ 'common.until'|trans({'%time%': cooldown.retryAt ? cooldown.retryAt|date('H:i') : '–'}) }}</dd>{% endfor %}
                     </dl>
                 </div>
             </details>
         {% else %}
-            <p class="muted">Paskyrų dar nėra. Prijunk pirmą aukščiau.</p>
+            <p class="muted">{{ 'accounts.none'|trans }}</p>
         {% endfor %}
     </section>
 {% endblock %}

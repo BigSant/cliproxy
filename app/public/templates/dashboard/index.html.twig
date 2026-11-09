@@ -1,57 +1,57 @@
 {% extends 'base.html.twig' %}
 
-{% block title %}Apžvalga{% endblock %}
+{% block title %}{{ 'nav.dashboard'|trans }}{% endblock %}
 
 {% block body %}
     <section class="stats">
         <div class="stat">
-            <div class="stat-label">Užklausos per 24 val.</div>
+            <div class="stat-label">{{ 'dashboard.requests_24h'|trans }}</div>
             <div class="stat-value">{{ totals.requests|tokens }}</div>
-            <div class="stat-sub">{{ totals.failed }} nepavyko</div>
+            <div class="stat-sub">{{ 'common.failed_count'|trans({'%count%': totals.failed}) }}</div>
         </div>
         <div class="stat">
-            <div class="stat-label">Tokenai per 24 val.</div>
+            <div class="stat-label">{{ 'dashboard.tokens_24h'|trans }}</div>
             <div class="stat-value">{{ totals.total|tokens }}</div>
-            <div class="stat-sub">įvestis {{ totals.input|tokens }} · išvestis {{ totals.output|tokens }}</div>
+            <div class="stat-sub">{{ 'common.input_output'|trans({'%input%': totals.input|tokens, '%output%': totals.output|tokens}) }}</div>
         </div>
         <div class="stat">
-            <div class="stat-label">Cache skaitymai / rašymai</div>
+            <div class="stat-label">{{ 'dashboard.cache'|trans }}</div>
             <div class="stat-value">{{ totals.cache_read|tokens }} <span class="muted">/ {{ totals.cache_creation|tokens }}</span></div>
-            <div class="stat-sub">skaitymų dalis {{ totals.cache_read|share(totals.cache_read + totals.cache_creation + totals.input) }}</div>
+            <div class="stat-sub">{{ 'dashboard.read_share'|trans({'%share%': totals.cache_read|share(totals.cache_read + totals.cache_creation + totals.input)}) }}</div>
         </div>
         {% include '_parts/cache_ttl_stat.html.twig' %}
         <div class="stat {{ affinity.moved > 0 ? 'stat-warn' }}">
             <div class="stat-label">Session affinity</div>
             <div class="stat-value">{{ affinity.sessions - affinity.moved }}<span class="muted">/{{ affinity.sessions }}</span></div>
-            <div class="stat-sub">{{ affinity.moved > 0 ? affinity.moved ~ ' sesijos perėjo į kitą paskyrą' : 'sesijos laikosi savo paskyros' }}</div>
+            <div class="stat-sub">{{ affinity.moved > 0 ? 'dashboard.affinity_moved'|trans({'%count%': affinity.moved}) : 'dashboard.affinity_kept'|trans }}</div>
         </div>
     </section>
 
     <section class="card">
         <div class="card-head">
             <div>
-                <h1>Paskyros ir limitai</h1>
+                <h1>{{ 'dashboard.accounts_limits'|trans }}</h1>
                 <p class="muted">
-                    Limitai perskaityti {{ quotaRefreshedAt|ago|trim('.', 'right') }}.
-                    {% if autoPriority %}Soonest-reset-first <strong>įjungtas</strong>: pirmiau naudojama paskyra, kurios savaitinis limitas atsinaujina anksčiausiai.{% else %}Soonest-reset-first išjungtas (<a href="{{ path('app_settings') }}">Nustatymai</a>).{% endif %}
+                    {{ 'dashboard.limits_read'|trans({'%ago%': quotaRefreshedAt|ago|trim('.', 'right')}) }}
+                    {% if autoPriority %}{{ 'dashboard.auto_priority_on_html'|trans|raw }}{% else %}{{ 'dashboard.auto_priority_off_html'|trans({'%url%': path('app_settings')|e})|raw }}{% endif %}
                 </p>
             </div>
             <form method="post" action="{{ path('app_accounts_quotas') }}">
                 <input type="hidden" name="_token" value="{{ csrf_token('accounts') }}">
                 <input type="hidden" name="back" value="dashboard">
-                <button class="button">Perskaityti dabar</button>
+                <button class="button">{{ 'dashboard.read_now'|trans }}</button>
             </form>
         </div>
         {% if rows is empty %}
             <div class="empty">
-                <p>Hub'e dar nėra paskyrų.</p>
-                <a class="button primary" href="{{ path('app_accounts') }}">Prijungti Claude ar Codex paskyrą</a>
+                <p>{{ 'dashboard.no_accounts'|trans }}</p>
+                <a class="button primary" href="{{ path('app_accounts') }}">{{ 'dashboard.connect_account'|trans }}</a>
             </div>
         {% else %}
             <div class="table-wrap">
                 <table class="accounts">
                     <thead>
-                        <tr><th>Paskyra</th><th>5 val.</th><th>7 d.</th><th>7 d. Fable</th><th class="num">Užklausos</th></tr>
+                        <tr><th>{{ 'common.account'|trans }}</th><th>{{ 'window.5h'|trans }}</th><th>{{ 'window.7d'|trans }}</th><th>{{ 'window.7d-fable'|trans }}</th><th class="num">{{ 'common.requests'|trans }}</th></tr>
                     </thead>
                     <tbody>
                         {% for row in rows %}
@@ -71,28 +71,28 @@
 
     <section class="card">
         <div class="card-head">
-            <h2>Gyvai</h2>
-            <span class="live-dot" title="Atnaujinama kas 5 s"></span>
+            <h2>{{ 'dashboard.live'|trans }}</h2>
+            <span class="live-dot" title="{{ 'dashboard.live_every'|trans }}"></span>
         </div>
         <div class="table-wrap">
             <table class="live" data-live-url="{{ path('app_live') }}">
                 <thead>
-                    <tr><th>Laikas</th><th>Paskyra</th><th>Modelis</th><th class="num">Įvestis</th><th class="num">Išvestis</th><th class="num">Cache skait.</th><th class="num">Cache raš.</th><th class="num">Trukmė</th></tr>
+                    <tr><th>{{ 'common.time'|trans }}</th><th>{{ 'common.account'|trans }}</th><th>{{ 'common.model'|trans }}</th><th class="num">{{ 'common.input'|trans }}</th><th class="num">{{ 'common.output'|trans }}</th><th class="num">{{ 'common.cache_read'|trans }}</th><th class="num">{{ 'common.cache_write'|trans }}</th><th class="num">{{ 'common.duration'|trans }}</th></tr>
                 </thead>
                 <tbody>
                     {% for record in recent %}
                         <tr class="{{ record.failed ? 'is-failed' }}">
                             <td>{{ record.occurredAt|date('H:i:s') }}</td>
                             <td><span class="email">{{ record.account }}</span></td>
-                            <td><span class="provider provider-{{ record.provider }}">{{ record.model }}</span>{% if record.reasoningEffort %} <span class="kind kind-effort" title="Reasoning effort">{{ record.reasoningEffort }}</span>{% endif %}</td>
+                            <td><span class="provider provider-{{ record.provider }}">{{ record.model }}</span>{% if record.reasoningEffort %} <span class="kind kind-effort" title="{{ 'common.reasoning_effort'|trans }}">{{ record.reasoningEffort }}</span>{% endif %}</td>
                             <td class="num">{{ record.inputTokens|tokens }}</td>
                             <td class="num">{{ record.outputTokens|tokens }}</td>
                             <td class="num">{{ record.cacheReadTokens|tokens }}</td>
                             <td class="num">{{ record.cacheCreationTokens|tokens }}</td>
-                            <td class="num">{{ (record.latencyMs / 1000)|number_format(1, ',') }} s</td>
+                            <td class="num">{{ (record.latencyMs / 1000)|decimal(1) }} s</td>
                         </tr>
                     {% else %}
-                        <tr class="placeholder"><td colspan="8" class="muted">Dar nėra užklausų per hub'ą.</td></tr>
+                        <tr class="placeholder"><td colspan="8" class="muted">{{ 'dashboard.no_requests'|trans }}</td></tr>
                     {% endfor %}
                 </tbody>
             </table>
