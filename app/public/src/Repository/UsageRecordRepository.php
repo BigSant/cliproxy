@@ -243,10 +243,13 @@ class UsageRecordRepository extends ServiceEntityRepository
         $best = null;
         foreach ($query->getQuery()->getResult() as $record) {
             $time = $record->occurredAt->getTimestamp() * 1_000_000 + $record->occurredMicros;
-            // A record from before the microseconds were kept (0) may lie anywhere in its second.
-            $latest = 0 === $record->occurredMicros ? $time + 999_999 : $time;
+            // A record from before the microseconds were kept (0) counts at its second's end: it was stamped after its
+            // turn's request, so it belongs to the turn that started before that, not to one starting within the second.
+            if (0 === $record->occurredMicros) {
+                $time += 999_999;
+            }
             $rank = [(int) ('' !== $model && $record->model === $model), $time];
-            if ($latest >= $from && $time < $to && (null === $best || $rank > $best[0])) {
+            if ($time >= $from && $time < $to && (null === $best || $rank > $best[0])) {
                 $best = [$rank, $record];
             }
         }

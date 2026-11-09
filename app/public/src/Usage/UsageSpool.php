@@ -154,6 +154,28 @@ class UsageSpool
         }
     }
 
+    /** Whether the day's file takes an append now: an empty line written and synced (read() skips empty lines). */
+    public function canAppend(string $day): bool
+    {
+        try {
+            $this->ensureDirectory();
+            $path = $this->path($day);
+            $new = !is_file($path);
+            $handle = @fopen($path, 'ab');
+            $ok = false !== $handle && 1 === @fwrite($handle, "\n") && fflush($handle) && fsync($handle);
+            if (false !== $handle) {
+                fclose($handle);
+            }
+            if ($ok && $new) {
+                chmod($path, 0o600);
+            }
+
+            return $ok;
+        } catch (\Throwable) {
+            return false;
+        }
+    }
+
     /** @return list<string> every day in the spool, oldest first */
     public function days(): array
     {
