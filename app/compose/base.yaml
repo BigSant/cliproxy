@@ -1,0 +1,44 @@
+# CLIProxyAPI, the hub's proxy (README, "Architektūra"). Claude Code and Codex reach it on the host at
+# 127.0.0.1:${CLIPROXY_PORT}; the dashboard (php-fpm, cron) calls its management API inside the project network as
+# http://cliproxy:8317. The management key never reaches a file: MANAGEMENT_PASSWORD keeps it in the container's
+# environment only (CLIProxyAPI hashes and rewrites a secret-key from config.yaml instead).
+services:
+  cliproxy:
+    image: eceasy/cli-proxy-api:${CLIPROXY_VERSION:?Set CLIPROXY_VERSION in env/common.env}
+    container_name: ${PROJECT_NAME}-${ENV}-cliproxy
+    restart: unless-stopped
+    # The host user owns the state directory (config, accounts, logs), as with the other project data.
+    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
+    entrypoint: ["/bin/sh", "/opt/cliproxy/entrypoint.sh"]
+    environment:
+      TZ: ${TZ}
+      HOME: /tmp
+      MANAGEMENT_PASSWORD: ${CLIPROXY_MANAGEMENT_KEY:?Set CLIPROXY_MANAGEMENT_KEY in env/<env>.env}
+      # Only the first start of an empty state directory reads it (config.yaml's access.api-keys); afterwards the
+      # dashboard's settings page manages the keys.
+      CLIPROXY_API_KEY: ${CLIPROXY_API_KEY:?Set CLIPROXY_API_KEY in env/<env>.env}
+    ports:
+      - "127.0.0.1:${CLIPROXY_PORT:?Set CLIPROXY_PORT in env/<env>.env}:8317"
+    volumes:
+      - ${PROJECT_DOCKER_DIRECTORY}/config/cliproxy/:/opt/cliproxy/:ro
+      - ${PROJECT_DATA_DIRECTORY}/cliproxy/:/CLIProxyAPI/state/
+    networks:
+      - network_app
+    logging:
+      driver: json-file
+      options:
+        max-size: ${CONTAINER_LOG_MAX_SIZE:-10m}
+        max-file: "${CONTAINER_LOG_MAX_FILES:-3}"
+    healthcheck:
+      # The server accepts connections on its port (bash: the image has no HTTP client).
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8317"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 20s
+  php-fpm:
+    environment:
+      CLIPROXY_MANAGEMENT_URL: http://cliproxy:8317
+  cron:
+    environment:
+      CLIPROXY_MANAGEMENT_URL: http://cliproxy:8317

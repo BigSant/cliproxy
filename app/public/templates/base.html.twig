@@ -1,24 +1,42 @@
 <!DOCTYPE html>
-<html>
+<html lang="lt">
     <head>
         <meta charset="UTF-8">
-        <title>{% block title %}Welcome!{% endblock %}</title>
-        <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 128 128%22><text y=%221.2em%22 font-size=%2296%22>⚫️</text><text y=%221.3em%22 x=%220.2em%22 font-size=%2276%22 fill=%22%23fff%22>sf</text></svg>">
-        {% block stylesheets %}
-        {% endblock %}
-
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <title>{% block title %}Hub{% endblock %} · CLIProxy hub</title>
+        <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 32 32%22><rect width=%2232%22 height=%2232%22 rx=%228%22 fill=%22%23d97757%22/><path d=%22M9 16h14M16 9v14%22 stroke=%22white%22 stroke-width=%223%22 stroke-linecap=%22round%22/></svg>">
         {% block javascripts %}
-            {% block importmap %}{{ importmap('app') }}{% endblock %}
+            {{ importmap('app') }}
         {% endblock %}
-
-        {% set frankenphp_hot_reload = app.request.server.get('FRANKENPHP_HOT_RELOAD') %}
-        {% if frankenphp_hot_reload %}
-        <meta name="frankenphp-hot-reload:url" content="{{ frankenphp_hot_reload }}">
-        <script src="https://cdn.jsdelivr.net/npm/idiomorph"></script>
-        <script src="https://cdn.jsdelivr.net/npm/frankenphp-hot-reload/+esm" type="module"></script>
-        {% endif %}
     </head>
     <body>
-        {% block body %}{% endblock %}
+        {% if app.user %}
+            <header class="topbar">
+                <a class="brand" href="{{ path('app_dashboard') }}"><span class="brand-mark">+</span> CLIProxy hub</a>
+                <nav>
+                    {% set route = app.request.attributes.get('_route') %}
+                    <a href="{{ path('app_dashboard') }}" class="{{ route == 'app_dashboard' ? 'active' }}">Apžvalga</a>
+                    <a href="{{ path('app_accounts') }}" class="{{ route starts with 'app_accounts' ? 'active' }}">Paskyros</a>
+                    <a href="{{ path('app_usage') }}" class="{{ route == 'app_usage' ? 'active' }}">Naudojimas</a>
+                    <a href="{{ path('app_settings') }}" class="{{ route == 'app_settings' ? 'active' }}">Nustatymai</a>
+                    <a href="{{ path('app_connect') }}" class="{{ route == 'app_connect' ? 'active' }}">Prijungimas</a>
+                </nav>
+                <form method="post" action="{{ path('app_logout') }}" class="logout">
+                    <input type="hidden" name="_csrf_token" value="{{ csrf_token('logout') }}">
+                    <button type="submit" class="link">Atsijungti</button>
+                </form>
+            </header>
+        {% endif %}
+        <main class="{% block main_class %}page{% endblock %}">
+            {% for type, messages in app.flashes %}
+                {% for message in messages %}
+                    <div class="flash flash-{{ type }}" role="status">{{ message }}</div>
+                {% endfor %}
+            {% endfor %}
+            {% if error is defined and error %}
+                <div class="flash flash-error" role="alert"><strong>CLIProxyAPI nepasiekiamas.</strong> {{ error }}</div>
+            {% endif %}
+            {% block body %}{% endblock %}
+        </main>
     </body>
 </html>

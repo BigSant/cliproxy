@@ -1,0 +1,20 @@
+#!/bin/sh
+# Usage: .github/ci/checkout-code <checkout>
+# Prints the physical path of <checkout>/app/public, the only directory the checks bind-mount into a container,
+# after making sure it is really inside the checkout. Docker mounts the host target of a symlink read-write, so a
+# branch that turned app or app/public into a symlink (say, to another project's directory) is refused, and so is
+# a resolved path outside the checkout. Every script and step calls it right before its bind mount.
+set -eu
+checkout=$(cd -P "${1:?usage: checkout-code <checkout>}" && pwd -P)
+for part in app app/public; do
+    if [ -L "$checkout/$part" ] || [ ! -d "$checkout/$part" ]; then
+        echo "Refused: $part in the checkout is a symlink or not a directory" >&2
+        exit 1
+    fi
+done
+code=$(cd -P "$checkout/app/public" && pwd -P)
+if [ "$code" != "$checkout/app/public" ]; then
+    echo "Refused: app/public resolves to $code, outside the checkout $checkout" >&2
+    exit 1
+fi
+printf '%s\n' "$code"

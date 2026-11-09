@@ -1,0 +1,22 @@
+{
+  "format": 1,
+  "dialect": "mysql",
+  "tables": [
+    {
+      "name": "doctrine_migration_versions",
+      "file": "table-doctrine_migration_versions.sql"
+    },
+    {
+      "name": "quota_snapshot",
+      "file": "table-quota_snapshot.sql"
+    },
+    {
+      "name": "setting",
+      "file": "table-setting.sql"
+    },
+    {
+      "name": "usage_record",
+      "file": "table-usage_record.sql"
+    }
+  ]
+}

@@ -1,0 +1,3 @@
+# actionlint: the label of setup-server's self-hosted runners.
+self-hosted-runner:
+  labels: [setup.build]

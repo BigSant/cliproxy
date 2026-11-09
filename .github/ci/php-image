@@ -1,0 +1,19 @@
+#!/bin/sh
+# Usage: .github/ci/php-image
+# Prints the tag of the PHP image the checks run the app in, building it once. It is PHP_IMAGE (official, pinned by
+# digest) plus what setup's PHP image gives the app: pdo_mysql and date.timezone = Europe/Vilnius (setup's TZ default).
+# The tests use SQLite (pdo_sqlite is in the official image). The build sees no checkout. The tag is
+# cliproxy-ci-php:<hash of this recipe>, never a tag another stack uses.
+set -eu
+: "${PHP_IMAGE:?}"
+dockerfile=$(cat <<DOCKERFILE
+FROM $PHP_IMAGE
+RUN docker-php-ext-install -j"\$(nproc)" pdo_mysql
+RUN printf '%s\\n' 'date.timezone = Europe/Vilnius' 'memory_limit = 512M' > /usr/local/etc/php/conf.d/cliproxy-ci.ini
+DOCKERFILE
+)
+image="cliproxy-ci-php:$(printf '%s' "$dockerfile" | sha256sum | cut -c1-16)"
+if ! docker image inspect "$image" >/dev/null 2>&1; then
+    printf '%s\n' "$dockerfile" | docker build --quiet --tag "$image" - >&2
+fi
+printf '%s\n' "$image"

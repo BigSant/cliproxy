@@ -1,0 +1,2 @@
+# git archive (every release, setup's make deploy) writes the commit into it; /_health reports it.
+config/release.txt export-subst
