@@ -141,7 +141,14 @@ ankstesnį release'ą. Paslaptys – repo Actions secrets `PROD_APP_SECRET`, `PR
 `PROD_CLIPROXY_MANAGEMENT_KEY`, `PROD_CLIPROXY_API_KEY`, `PROD_DATABASE_PASSWORD`, `PROD_DATABASE_ROOT_PASSWORD`
 (`make -C app deploy-variables ENV=prod names=1`).
 
-Prod skydelis – `hub.cliproxy.local` per nginx-proxy `127.0.0.1:18327` (HTTPS `18328`); proxy – `127.0.0.1:8317`.
+Prod skydelis – <https://hub.cliproxy.local> (vartotojas `admin`, slaptažodis – `~/.config/cliproxy/admin-password`,
+0600; tas pats yra secret `PROD_ADMIN_PASSWORD`); proxy – `127.0.0.1:8317`. Kompiuterio nginx
+(`/etc/nginx/sites-available/hub.cliproxy.local.conf`, mkcert sertifikatas `~/.config/cliproxy/tls/`) jį leidžia tik
+iš `127.0.0.1`/`::1` ir perduoda prod nginx-proxy `127.0.0.1:18327`; `/etc/hosts` – `127.0.0.1 hub.cliproxy.local`.
+
+Paruoštos atskiros įrankių konfigūracijos, kurios įprastų nekeičia: `CLAUDE_CONFIG_DIR=~/.claude-hub claude` ir
+`CODEX_HOME=~/.codex-hub codex` (abi rodo į `127.0.0.1:8317` su prod raktu). Kai paskyros prijungtos ir veikia, tą
+patį galima perkelti į `~/.claude/settings.json` ir `~/.codex/config.toml`.
 
 **Paskyrų raktai** yra `runtime/cliproxy/prod/data/prod/cliproxy/auth/`. Jie į DB kopijas nepatenka – jei kompiuteris
 būtų perrašytas, paskyras prijunk iš naujo. Nekopijuok jų į kitus kompiuterius ir nekelk į git.
