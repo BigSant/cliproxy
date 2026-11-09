@@ -20,6 +20,8 @@
         <server name="CLIPROXY_MANAGEMENT_KEY" value="test-management-key" force="true" />
         <server name="CLIPROXY_PUBLIC_URL" value="http://127.0.0.1:8317" force="true" />
         <server name="ADMIN_PASSWORD" value="test-password" force="true" />
+        <server name="CLIPROXY_LOG_DIR" value="/tmp/cliproxy-test/logs" force="true" />
+        <server name="TRAFFIC_ARCHIVE_DIR" value="/tmp/cliproxy-test/archive" force="true" />
     </php>
 
     <testsuites>

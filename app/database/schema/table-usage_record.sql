@@ -17,8 +17,10 @@ CREATE TABLE `usage_record` (
   `latency_ms` int NOT NULL,
   `failed` tinyint NOT NULL,
   `status_code` int NOT NULL,
+  `request_tail` varchar(8) NOT NULL DEFAULT '',
   PRIMARY KEY (`id`),
   KEY `usage_occurred` (`occurred_at`),
   KEY `usage_account` (`auth_index`,`occurred_at`),
-  KEY `usage_session` (`session_id`)
+  KEY `usage_session` (`session_id`),
+  KEY `usage_request` (`request_tail`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;

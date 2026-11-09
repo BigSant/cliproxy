@@ -189,8 +189,13 @@ class AccountController extends AbstractController
     {
         $this->checkToken($request);
 
-        return $this->attempt(fn () => $collector->refreshQuotas(), 'Limitai perskaityti.',
-            (string) $request->request->get('back') === 'dashboard' ? 'app_dashboard' : 'app_accounts');
+        $back = match ((string) $request->request->get('back')) {
+            'dashboard' => 'app_dashboard',
+            'quota' => 'app_quota',
+            default => 'app_accounts',
+        };
+
+        return $this->attempt(fn () => $collector->refreshQuotas(), 'Limitai perskaityti.', $back);
     }
 
     private function name(Request $request): string

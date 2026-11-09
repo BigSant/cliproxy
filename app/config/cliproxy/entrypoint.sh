@@ -4,7 +4,7 @@
 # which the dashboard and CLIProxyAPI itself change.
 set -eu
 state=/CLIProxyAPI/state
-mkdir -p "$state/auth" "$state/logs"
+mkdir -p "$state/auth" /CLIProxyAPI/traffic/logs /CLIProxyAPI/traffic/archive
 if [ ! -s "$state/config.yaml" ]; then
     case "$CLIPROXY_API_KEY" in
         *[!A-Za-z0-9_-]*|'') echo "CLIPROXY_API_KEY may hold only letters, digits, - and _" >&2; exit 1 ;;
@@ -14,5 +14,6 @@ if [ ! -s "$state/config.yaml" ]; then
     mv "$state/config.yaml.new" "$state/config.yaml"
     echo "Wrote $state/config.yaml from the template"
 fi
-cd "$state"
+# CLIProxyAPI writes logs/ in its working directory: the traffic directory, which the collector reads.
+cd /CLIProxyAPI/traffic
 exec /CLIProxyAPI/CLIProxyAPI -config "$state/config.yaml"

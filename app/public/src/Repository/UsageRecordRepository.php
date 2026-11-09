@@ -89,6 +89,24 @@ class UsageRecordRepository extends ServiceEntityRepository
         return $this->findBy([], ['occurredAt' => 'DESC', 'id' => 'DESC'], $limit);
     }
 
+    /** The usage record of a request: the same request id ending, within a quarter of an hour. */
+    public function forRequest(string $requestTail, \DateTimeImmutable $at): ?UsageRecord
+    {
+        if ('' === $requestTail) {
+            return null;
+        }
+
+        return $this->createQueryBuilder('u')
+            ->where('u.requestTail = :tail')
+            ->andWhere('u.occurredAt BETWEEN :from AND :to')
+            ->setParameter('tail', $requestTail)
+            ->setParameter('from', $at->modify('-15 minutes'), 'utc_datetime_immutable')
+            ->setParameter('to', $at->modify('+15 minutes'), 'utc_datetime_immutable')
+            ->setMaxResults(1)
+            ->getQuery()
+            ->getOneOrNullResult();
+    }
+
     public function deleteOlderThan(\DateTimeImmutable $before): int
     {
         return (int) $this->getEntityManager()->getConnection()->createQueryBuilder()

@@ -7,15 +7,17 @@ use App\Entity\UsageRecord;
 use App\Quota\QuotaFetcher;
 use App\Repository\QuotaSnapshotRepository;
 use App\Repository\UsageRecordRepository;
+use App\Repository\ExchangeRepository;
 use App\Routing\SoonestResetPrioritizer;
 use App\Settings\Settings;
+use App\Traffic\TrafficIngester;
 use Doctrine\ORM\EntityManagerInterface;
 use Psr\Clock\ClockInterface;
 
 /**
  * What the hub does in the background (app:collect, every minute from cron): moves usage records out of CLIProxyAPI's
- * queue into the database, reads every account's limits when they are older than the refresh interval, applies
- * soonest-reset-first priorities when they are on, and drops old history.
+ * queue and its request logs into the database, reads every account's limits when they are older than the refresh
+ * interval, applies soonest-reset-first priorities when they are on, and drops old history.
  */
 class Collector
 {
@@ -30,6 +32,8 @@ class Collector
         private readonly Settings $settings,
         private readonly UsageRecordRepository $usage,
         private readonly QuotaSnapshotRepository $snapshots,
+        private readonly ExchangeRepository $exchanges,
+        private readonly TrafficIngester $traffic,
         private readonly EntityManagerInterface $entityManager,
         private readonly ClockInterface $clock,
     ) {
@@ -50,6 +54,12 @@ class Collector
         } while (\count($records) === self::BATCH);
 
         return $stored;
+    }
+
+    /** @return int the request logs taken in */
+    public function collectTraffic(): int
+    {
+        return $this->traffic->ingest();
     }
 
     public function quotasDue(): bool
@@ -87,6 +97,8 @@ class Collector
         }
         $this->usage->deleteOlderThan($now->modify(self::KEEP_USAGE));
         $this->snapshots->deleteOlderThan($now->modify(self::KEEP_QUOTA));
+        $this->exchanges->deleteOlderThan($now->modify(self::KEEP_USAGE));
+        $this->traffic->pruneArchive($this->settings->archiveDays());
         $this->settings->markNow(Settings::PRUNED_AT, $now);
     }
 }

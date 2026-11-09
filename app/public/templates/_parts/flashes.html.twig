@@ -1,0 +1,8 @@
+    {% for type, messages in app.flashes %}
+        {% for message in messages %}
+            <div class="flash flash-{{ type }}" role="status">{{ message }}</div>
+        {% endfor %}
+    {% endfor %}
+    {% if error is defined and error %}
+        <div class="flash flash-error" role="alert"><strong>CLIProxyAPI nepasiekiamas.</strong> {{ error }}</div>
+    {% endif %}

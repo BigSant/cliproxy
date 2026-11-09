@@ -14,7 +14,7 @@ use Symfony\Component\Lock\LockFactory;
  * cron runs it every minute with --duration=55 (app/config/cron/crontab): usage every few seconds, limits on their
  * interval. A run that finds another one still going leaves at once.
  */
-#[AsCommand(name: 'app:collect', description: 'Move CLIProxyAPI usage into the database and refresh account limits')]
+#[AsCommand(name: 'app:collect', description: 'Move CLIProxyAPI usage and request logs into the database and refresh account limits')]
 class CollectCommand
 {
     public function __construct(
@@ -43,6 +43,10 @@ class CollectCommand
                     $stored = $this->collector->collectUsage();
                     if ($stored > 0) {
                         $io->writeln(\sprintf('Stored %d usage records.', $stored));
+                    }
+                    $logs = $this->collector->collectTraffic();
+                    if ($logs > 0) {
+                        $io->writeln(\sprintf('Took in %d request logs.', $logs));
                     }
                     if ($quotas || $this->collector->quotasDue()) {
                         $quotas = false;

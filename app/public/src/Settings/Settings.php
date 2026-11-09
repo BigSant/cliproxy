@@ -13,6 +13,7 @@ class Settings
     public const string QUOTA_REFRESH_MINUTES = 'quota_refresh_minutes';
     public const string QUOTA_REFRESHED_AT = 'quota_refreshed_at';
     public const string PRUNED_AT = 'pruned_at';
+    public const string ARCHIVE_DAYS = 'archive_days';
 
     public function __construct(
         private readonly SettingRepository $repository,
@@ -31,6 +32,14 @@ class Settings
         $minutes = $this->get(self::QUOTA_REFRESH_MINUTES);
 
         return \is_int($minutes) && $minutes >= 1 ? $minutes : 5;
+    }
+
+    /** How long raw request logs stay in the archive; the parsed exchanges stay 90 days. */
+    public function archiveDays(): int
+    {
+        $days = $this->get(self::ARCHIVE_DAYS);
+
+        return \is_int($days) && $days >= 1 ? $days : 14;
     }
 
     public function instant(string $name): ?\DateTimeImmutable
