@@ -60,6 +60,24 @@ class QuotaFetcherTest extends TestCase
         self::assertSame(90.0, $windows[1]->used);
     }
 
+    public function testCodexHeadersWithAResetAfterAndAWindowLength(): void
+    {
+        $at = new \DateTimeImmutable('2026-11-09T12:00:00Z');
+        $windows = QuotaFetcher::fromHeaders([
+            'x-codex-primary-used-percent' => '80', 'x-codex-primary-window-minutes' => '10080', 'x-codex-primary-reset-after-seconds' => '3600',
+        ], $at);
+
+        self::assertSame(QuotaWindow::WEEK, $windows[0]->key, 'the length decides, not the name');
+        self::assertSame('2026-11-09T13:00:00+00:00', $windows[0]->resetsAt?->format(\DATE_ATOM));
+    }
+
+    public function testClaudeHeadersGiveTheFableWindowAndFractionsAboveOne(): void
+    {
+        $windows = QuotaFetcher::fromHeaders(['anthropic-ratelimit-unified-7d_oi-utilization' => '0.4', 'anthropic-ratelimit-unified-5h-utilization' => '1.05']);
+
+        self::assertSame([[QuotaWindow::FIVE_HOUR, 105.0], [QuotaWindow::WEEK_FABLE, 40.0]], array_map(static fn ($w) => [$w->key, round($w->used, 2)], $windows));
+    }
+
     public function testHeadersOfCodex(): void
     {
         $windows = QuotaFetcher::fromHeaders(['x-codex-secondary-used-percent' => '64', 'x-codex-secondary-reset-at' => '1794300000']);

@@ -43,31 +43,62 @@ class Collector
     }
 
     /**
-     * Takes the queue in batches: each batch goes to the spool first, then to the database. A failed database write
-     * leaves the day pending; the next pass replays it.
+     * Takes the queue in batches. Each batch is sanitized, appended to the spool and its day marked pending before the
+     * database write, and unmarked after it. When the database is away the queue is still taken (into the spool), so
+     * nothing expires in CLIProxyAPI's queue; the first error is thrown at the end, for the alerts.
      *
      * @return int the usage records stored
      */
     public function collectUsage(): int
     {
-        $stored = $this->replayPending();
+        $stored = 0;
+        $failure = null;
+        try {
+            $stored += $this->replayPending();
+        } catch (\Throwable $exception) {
+            $failure = $exception;
+            $this->doctrine->resetManager();
+        }
+        $stored += $this->replayRecentIfDue();
+        $done = $failed = [];
         do {
-            $records = $this->client->takeUsage(self::BATCH);
+            $records = array_map(UsageRecord::sanitize(...), $this->client->takeUsage(self::BATCH));
             if ([] === $records) {
                 break;
             }
-            $day = $this->spool->append($records, $this->clock->now());
+            $day = null;
+            try {
+                $day = $this->spool->append($records, $this->clock->now());
+                $this->spool->markPending($day);
+            } catch (\Throwable $exception) {
+                $failure ??= new \RuntimeException('Usage spool not written ('.$exception->getMessage().'): the records go to the database only', 0, $exception);
+            }
+            if (null !== $day && $failure instanceof \Doctrine\DBAL\Exception) {
+                // The database is still away: the batch waits in the spool.
+                continue;
+            }
             try {
                 $stored += $this->store($records);
+                if (null !== $day) {
+                    $done[$day] = true;
+                }
             } catch (\Throwable $exception) {
-                $this->spool->markPending($day);
+                $failure ??= $exception;
+                if (null !== $day) {
+                    $failed[$day] = true;
+                }
                 $this->doctrine->resetManager();
-                throw $exception;
             }
         } while (\count($records) === self::BATCH);
-        if ($this->limitsChanged && $this->settings->autoPriority()) {
+        foreach (array_keys(array_diff_key($done, $failed)) as $day) {
+            $this->spool->unmarkPending($day);
+        }
+        if ($this->limitsChanged && $this->settings->autoPriority() && null === $failure) {
             $this->limitsChanged = false;
             $this->prioritizer->apply($this->client->accounts(), $this->snapshots->latest(), $this->clock->now());
+        }
+        if (null !== $failure) {
+            throw $failure;
         }
 
         return $stored;
@@ -78,7 +109,7 @@ class Collector
     {
         $stored = 0;
         foreach ($this->spool->read($day) as $records) {
-            $stored += $this->store($records);
+            $stored += $this->store(array_map(UsageRecord::sanitize(...), $records));
         }
 
         return $stored;
@@ -112,12 +143,30 @@ class Collector
         $accounts = $this->client->accounts();
         $entityManager = $this->doctrine->getManager();
         $userAgents = $this->usage->latestUserAgents();
+        $latest = $this->snapshots->latest();
+        $errors = [];
+        // Each provider request may take 10 s; the whole read stays well inside the collector's minute.
+        $deadline = microtime(true) + 40;
         foreach ($accounts as $account) {
-            if ($account->isClaude() || $account->isCodex()) {
-                $entityManager->persist($this->quotaFetcher->fetch($account, $userAgents[$account->provider] ?? null));
+            if ((!$account->isClaude() && !$account->isCodex()) || microtime(true) > $deadline) {
+                continue;
             }
+            $snapshot = $this->quotaFetcher->fetch($account, $userAgents[$account->provider] ?? null);
+            if (null !== $snapshot->error) {
+                $errors[$account->authIndex] = $this->clock->now()->format('Y-m-d H:i').': '.$snapshot->error;
+            }
+            $previous = $latest[$account->authIndex] ?? null;
+            if ('headers' === $snapshot->source) {
+                // A fallback from headers no newer than what is known adds nothing.
+                if (null !== $previous && $snapshot->fetchedAt <= $previous->fetchedAt) {
+                    continue;
+                }
+                $snapshot = $snapshot->withMissingFrom($previous);
+            }
+            $entityManager->persist($snapshot);
         }
         $entityManager->flush();
+        $this->settings->set(Settings::QUOTA_ERRORS, $errors);
         $this->settings->markNow(Settings::QUOTA_REFRESHED_AT, $this->clock->now());
         $this->settings->set(Settings::QUOTA_REFRESH_REQUESTED, false);
         if ($this->settings->autoPriority()) {
@@ -136,8 +185,29 @@ class Collector
         $stored = 0;
         foreach ($days as $day) {
             $stored += $this->replay($day);
+            $this->spool->unmarkPending($day);
         }
-        $this->spool->clearPending();
+
+        return $stored;
+    }
+
+    /**
+     * Once an hour, today and yesterday from the spool again: whatever a crash or a bug kept out of the database comes
+     * in (the record keys make it cheap and idempotent).
+     */
+    private function replayRecentIfDue(): int
+    {
+        $last = $this->settings->instant(Settings::USAGE_REPLAYED_AT);
+        $now = $this->clock->now();
+        if (null !== $last && $now->getTimestamp() - $last->getTimestamp() < 3600) {
+            return 0;
+        }
+        $this->settings->markNow(Settings::USAGE_REPLAYED_AT, $now);
+        $stored = 0;
+        $utc = $now->setTimezone(new \DateTimeZone('UTC'));
+        foreach ([$utc->modify('-1 day')->format('Y-m-d'), $utc->format('Y-m-d')] as $day) {
+            $stored += $this->replay($day);
+        }
 
         return $stored;
     }
@@ -159,6 +229,7 @@ class Collector
         foreach ($this->usage->existingKeys(array_keys($rows)) as $key) {
             unset($rows[$key]);
         }
+        $this->markRetries($rows);
         $newestWithHeaders = [];
         foreach ($rows as $row) {
             $entityManager->persist($row);
@@ -174,7 +245,7 @@ class Collector
                 continue;
             }
             $windows = [];
-            foreach (QuotaFetcher::fromHeaders($row->rateLimitHeaders()) as $window) {
+            foreach (QuotaFetcher::fromHeaders($row->rateLimitHeaders(), $row->occurredAt) as $window) {
                 $windows[$window->key] = $window;
             }
             if ([] === $windows) {
@@ -192,5 +263,38 @@ class Collector
         $entityManager->clear();
 
         return \count($rows);
+    }
+
+    /**
+     * A record is a retry when the attempt before it of the same request (in the database or earlier in this batch)
+     * failed within ten minutes before it. A Codex WebSocket connection shares one request id across its turns; a
+     * successful turn before it makes a record a new turn, not a retry.
+     *
+     * @param array<string, UsageRecord> $rows
+     */
+    private function markRetries(array $rows): void
+    {
+        $byRequest = [];
+        foreach ($rows as $row) {
+            if ('' !== $row->requestId) {
+                $byRequest[$row->requestId][] = ['at' => $row->occurredAt->getTimestamp(), 'failed' => $row->failed, 'row' => $row];
+            }
+        }
+        if ([] === $byRequest) {
+            return;
+        }
+        foreach ($this->usage->attemptsOf(array_keys($byRequest)) as $attempt) {
+            $byRequest[$attempt['request_id']][] = ['at' => $attempt['at'], 'failed' => $attempt['failed'], 'row' => null];
+        }
+        foreach ($byRequest as $attempts) {
+            usort($attempts, static fn (array $a, array $b) => $a['at'] <=> $b['at']);
+            $previous = null;
+            foreach ($attempts as $attempt) {
+                if (null !== $attempt['row'] && null !== $previous && $previous['failed'] && $attempt['at'] - $previous['at'] <= 600) {
+                    $attempt['row']->isRetry = true;
+                }
+                $previous = $attempt;
+            }
+        }
     }
 }

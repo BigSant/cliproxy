@@ -24,6 +24,10 @@ class TrafficIngester
     private const int MAX_TOOL_OUTPUT = 16_384;
     /** A file younger than this may still be written (streams are logged as they go). */
     private const int SETTLE_SECONDS = 5;
+    /** Larger files are archived as a stream and not parsed (a long Codex WebSocket connection can grow without end). */
+    private const int MAX_PARSE_BYTES = 256 * 1_048_576;
+    /** Attempts on one file before the quarantine: the process died on it this many times. */
+    private const int MAX_ATTEMPTS = 2;
 
     public function __construct(
         #[Autowire('%env(CLIPROXY_LOG_DIR)%')]
@@ -39,8 +43,11 @@ class TrafficIngester
     }
 
     /**
-     * Takes every finished request log, oldest first. A file that cannot be read goes to the quarantine with its
-     * error beside it, so it never blocks the files after it; nothing is lost.
+     * Takes every finished request log, oldest first.
+     * - A file whose content cannot be read goes to the quarantine with its error beside it, so it never blocks the
+     *   files after it (app:traffic:retry brings it back).
+     * - A database or disk error is not the file's fault: the pass stops and the file waits in logs/ for the next one.
+     * - A file the process died on twice (memory) goes to the quarantine too: logs/.ingesting remembers the attempts.
      *
      * @return int the request logs taken in
      */
@@ -60,13 +67,25 @@ class TrafficIngester
         asort($files);
         $taken = 0;
         foreach (\array_slice(array_keys($files), 0, $limit) as $path) {
+            $attempts = $this->startAttempt(basename($path));
+            if ($attempts > self::MAX_ATTEMPTS) {
+                $this->quarantine($path, new \RuntimeException(\sprintf('The collector died %d times taking this file (memory?)', self::MAX_ATTEMPTS)));
+                $this->endAttempt();
+                continue;
+            }
             try {
                 $this->takeFile($path);
                 ++$taken;
             } catch (\Throwable $exception) {
                 $this->doctrine->resetManager();
+                $this->endAttempt();
+                if (self::isTransient($exception)) {
+                    throw $exception;
+                }
                 $this->quarantine($path, $exception);
+                continue;
             }
+            $this->endAttempt();
         }
 
         return $taken;
@@ -75,28 +94,129 @@ class TrafficIngester
     /**
      * One log file into the database: a Codex WebSocket connection gives one exchange per turn, any other file one.
      * The compressed copy is in the archive before the database row, and the file leaves the logs directory only
-     * after both. Taking a file again (a retry after a failure) replaces its rows instead of adding to them.
+     * after both. A file too large to read whole is archived as a stream and recorded by its size only.
      *
      * @return list<Exchange>
      */
     public function takeFile(string $path): array
     {
         $name = basename($path);
-        $text = file_get_contents($path);
-        if (false === $text) {
-            throw new \RuntimeException('Cannot read '.$path);
-        }
-        $log = RequestLog::parse($text);
+        $size = (int) filesize($path);
         $writtenAt = (int) filemtime($path);
-        $archived = $this->archive($name, $text, $log->startedAt() ?? $this->clock->now());
-        $entityManager = $this->doctrine->getManager();
+        if ($size > self::MAX_PARSE_BYTES) {
+            $archived = $this->archiveStream($name, $path, $this->clock->now()->setTimestamp($writtenAt));
+            $exchanges = [$this->tooLarge($name, $path, $size, $writtenAt, $archived)];
+        } else {
+            $text = file_get_contents($path);
+            if (false === $text) {
+                throw new \RuntimeException('Cannot read '.$path);
+            }
+            $log = RequestLog::parse($text);
+            $archived = $this->archive($name, $text, $log->startedAt() ?? $this->clock->now());
+            unset($text);
+            $exchanges = $this->record($name, $log, $writtenAt, $archived);
+        }
+        unlink($path);
+        $this->doctrine->getManager()->clear();
 
+        return $exchanges;
+    }
+
+    /**
+     * Reads an archived log again (app:traffic:reparse): its exchanges are rebuilt with today's parser, keeping their
+     * tool results and links. The archive is not touched.
+     *
+     * @return list<Exchange>
+     */
+    public function reparse(string $archivePath): array
+    {
+        $path = $this->archiveDirectory.'/'.$archivePath;
+        $text = is_file($path) ? @gzdecode((string) file_get_contents($path)) : false;
+        if (false === $text) {
+            throw new \RuntimeException('Cannot read the archive copy '.$archivePath);
+        }
+        $name = basename($archivePath, '.gz');
+        $exchanges = $this->record($name, RequestLog::parse($text), (int) filemtime($path), $archivePath);
+        $this->doctrine->getManager()->clear();
+
+        return $exchanges;
+    }
+
+    /**
+     * Pieces of request logs CLIProxyAPI never finished (it was stopped mid-stream; a long WebSocket connection's
+     * timeline lives in logs/request-log-parts-* until the connection closes). Idle for an hour, they move to
+     * archive/orphans/<day>/ as they are: kept, not parsed.
+     *
+     * @return int directories moved
+     */
+    public function collectOrphans(): int
+    {
+        $moved = 0;
+        $idle = $this->clock->now()->getTimestamp() - 3600;
+        foreach (glob($this->logDirectory.'/request-log-parts-*', \GLOB_ONLYDIR) ?: [] as $directory) {
+            $newest = filemtime($directory) ?: 0;
+            foreach (new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($directory, \FilesystemIterator::SKIP_DOTS)) as $file) {
+                $newest = max($newest, $file->getMTime());
+            }
+            if ($newest > $idle) {
+                continue;
+            }
+            $target = $this->archiveDirectory.'/orphans/'.date('Y-m-d', $newest);
+            if (!is_dir($target) && !@mkdir($target, 0o750, true) && !is_dir($target)) {
+                throw new ArchiveException('Cannot create '.$target);
+            }
+            if (!rename($directory, $target.'/'.basename($directory))) {
+                throw new ArchiveException('Cannot move '.basename($directory).' to '.$target);
+            }
+            ++$moved;
+        }
+
+        return $moved;
+    }
+
+    /** @return list<string> archive paths, oldest first (optionally from a day on) */
+    public function archived(?string $fromDay = null): array
+    {
+        $paths = [];
+        foreach (glob($this->archiveDirectory.'/*/*.log.gz') ?: [] as $file) {
+            $day = basename(\dirname($file));
+            if (null === $fromDay || $day >= $fromDay) {
+                $paths[] = $day.'/'.basename($file);
+            }
+        }
+        sort($paths);
+
+        return $paths;
+    }
+
+    /** Back from quarantine into logs/, for the next pass (app:traffic:retry). @return int files moved */
+    public function retryQuarantined(?string $name = null): int
+    {
+        $moved = 0;
+        foreach (glob($this->quarantineDirectory().'/*.log') ?: [] as $file) {
+            if (null !== $name && basename($file) !== $name) {
+                continue;
+            }
+            if (rename($file, $this->logDirectory.'/'.basename($file))) {
+                touch($this->logDirectory.'/'.basename($file), $this->clock->now()->getTimestamp() - self::SETTLE_SECONDS - 1);
+                @rename($file.'.error', $file.'.error.'.$this->clock->now()->format('YmdHis'));
+                ++$moved;
+            }
+        }
+
+        return $moved;
+    }
+
+    /** @return list<Exchange> */
+    private function record(string $name, RequestLog $log, int $writtenAt, string $archived): array
+    {
+        $entityManager = $this->doctrine->getManager();
         $exchanges = [];
         $timeline = $log->sections['WEBSOCKET TIMELINE'][0] ?? null;
         if (null !== $timeline && null === $log->status) {
             foreach (WebsocketTimeline::turns($timeline) as $index => $turn) {
                 $exchange = $this->exchangeFor(mb_substr($name, 0, 180).'#'.($index + 1));
-                $this->fillWebsocketTurn($exchange, $log, $turn);
+                $this->fillWebsocketTurn($exchange, $name, $log, $turn);
                 $exchange->archivePath = $archived;
                 // Saved turn by turn: a later turn's tool results find the calls of the earlier ones.
                 $entityManager->persist($exchange);
@@ -107,17 +227,37 @@ class TrafficIngester
         if ([] === $exchanges) {
             $exchange = $this->exchangeFor(mb_substr($name, 0, 190));
             $this->fill($exchange, $name, $log, $writtenAt);
-            $exchanges[] = $exchange;
-        }
-        foreach ($exchanges as $exchange) {
+            if (null !== $timeline) {
+                $exchange->endpoint = mb_substr($log->path().' (ws)', 0, 64);
+                $exchange->error = $exchange->error ?: 'Ryšys be nė vienos užklausos';
+            }
             $exchange->archivePath = $archived;
             $entityManager->persist($exchange);
+            $entityManager->flush();
+            $exchanges[] = $exchange;
         }
-        $entityManager->flush();
-        unlink($path);
-        $entityManager->clear();
 
         return $exchanges;
+    }
+
+    private function tooLarge(string $name, string $path, int $size, int $writtenAt, string $archived): Exchange
+    {
+        $head = (string) file_get_contents($path, false, null, 0, 65536);
+        $log = RequestLog::parse(substr($head, 0, (int) (strpos($head, '=== REQUEST BODY ===') ?: \strlen($head))));
+        $exchange = $this->exchangeFor(mb_substr($name, 0, 190));
+        $exchange->occurredAt = $log->startedAt() ?? $this->clock->now()->setTimestamp($writtenAt);
+        $exchange->endpoint = mb_substr($log->path(), 0, 64);
+        $exchange->client = mb_substr($log->headers['user-agent'] ?? '', 0, 64);
+        $exchange->requestTail = preg_match('/-([A-Za-z0-9]{1,8})\.log$/', $name, $match) ? $match[1] : '';
+        $exchange->provider = str_contains($log->path(), '/messages') ? 'claude' : 'codex';
+        $exchange->error = \sprintf('Failas per didelis išskaidyti (%d MB) – jis archyve, užklausos skaitomos tik iš jo.', intdiv($size, 1_048_576));
+        $exchange->requestBytes = $size;
+        $exchange->archivePath = $archived;
+        $entityManager = $this->doctrine->getManager();
+        $entityManager->persist($exchange);
+        $entityManager->flush();
+
+        return $exchange;
     }
 
     private function exchangeFor(string $logFile): Exchange
@@ -127,9 +267,43 @@ class TrafficIngester
             $exchange = new Exchange();
             $exchange->logFile = $logFile;
         }
-        $exchange->clearToolCalls();
 
         return $exchange;
+    }
+
+    /** Database and disk trouble passes; the file is not to blame. */
+    private static function isTransient(\Throwable $exception): bool
+    {
+        for ($cause = $exception; null !== $cause; $cause = $cause->getPrevious()) {
+            if ($cause instanceof \Doctrine\DBAL\Exception\UniqueConstraintViolationException) {
+                return false;
+            }
+            if ($cause instanceof \Doctrine\DBAL\Exception || $cause instanceof ArchiveException) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function startAttempt(string $name): int
+    {
+        $marker = $this->logDirectory.'/.ingesting';
+        $state = is_file($marker) ? json_decode((string) file_get_contents($marker), true) : null;
+        $attempts = \is_array($state) && ($state['file'] ?? null) === $name ? (int) $state['attempts'] + 1 : 1;
+        @file_put_contents($marker, json_encode(['file' => $name, 'attempts' => $attempts]));
+
+        return $attempts;
+    }
+
+    private function endAttempt(): void
+    {
+        @unlink($this->logDirectory.'/.ingesting');
+    }
+
+    private function quarantineDirectory(): string
+    {
+        return \dirname($this->archiveDirectory).'/quarantine';
     }
 
     private function fill(Exchange $exchange, string $name, RequestLog $log, int $writtenAt): void
@@ -159,6 +333,10 @@ class TrafficIngester
             $turn->model = (string) ($request['model'] ?? '');
         }
         $turn->sessionId = $log->headers['x-claude-code-session-id'] ?? $turn->sessionId;
+        if (str_contains($path, 'count_tokens')) {
+            // Claude Code counting tokens: no answer, no person's turn.
+            $turn->kind = Turn::KIND_SIDE;
+        }
         if ('' === $turn->error && ($exchange->statusCode >= 400 || 0 === $exchange->statusCode)) {
             $turn->error = self::errorText($log->responseBody) ?: self::errorText($log->apiErrors());
         }
@@ -167,10 +345,10 @@ class TrafficIngester
     }
 
     /** @param array{at: ?\DateTimeImmutable, endedAt: ?\DateTimeImmutable, request: array<string, mixed>, events: list<array<string, mixed>>, disconnect: string, bytes: int} $timelineTurn */
-    private function fillWebsocketTurn(Exchange $exchange, RequestLog $log, array $timelineTurn): void
+    private function fillWebsocketTurn(Exchange $exchange, string $name, RequestLog $log, array $timelineTurn): void
     {
-        // The connection's request id is not any turn's: their usage records are found by session and time.
-        $exchange->requestTail = '';
+        // Every turn of the connection shares its request id: linkAccounts takes their usage records in order.
+        $exchange->requestTail = preg_match('/-([A-Za-z0-9]{1,8})\.log$/', $name, $match) ? $match[1] : '';
         $exchange->occurredAt = $timelineTurn['at'] ?? $log->startedAt() ?? $this->clock->now();
         $exchange->endpoint = mb_substr($log->path().' (ws)', 0, 64);
         $exchange->client = mb_substr($log->headers['user-agent'] ?? '', 0, 64);
@@ -182,6 +360,10 @@ class TrafficIngester
         $turn = new Turn();
         ResponsesFormat::readEvents($timelineTurn['request'], $timelineTurn['events'], $turn);
         $turn->sessionId = $log->headers['session_id'] ?? $log->headers['session-id'] ?? $turn->sessionId;
+        if (false === ($timelineTurn['request']['generate'] ?? null)) {
+            // A prewarm: CLIProxyAPI answers it itself, nothing goes to the model.
+            $turn->kind = Turn::KIND_SIDE;
+        }
         $completed = \in_array($turn->stopReason, ['completed', 'incomplete'], true) || str_starts_with($turn->stopReason, 'incomplete');
         if ('' === $turn->error && !$completed) {
             $turn->error = '' !== $timelineTurn['disconnect'] ? 'Ryšys nutrūko: '.$timelineTurn['disconnect'] : 'Atsakymas nebaigtas';
@@ -197,7 +379,10 @@ class TrafficIngester
         $exchange->model = mb_substr($turn->model, 0, 128);
         $exchange->sessionId = mb_substr($turn->sessionId, 0, 64);
         $exchange->stream = $turn->stream;
-        $exchange->kind = $turn->kind;
+        // A kind the usage record told (subagent, compaction, fork) outlives a reparse.
+        if (null === $exchange->usageRecordId || Turn::KIND_MAIN === $exchange->kind || Turn::KIND_SIDE === $turn->kind) {
+            $exchange->kind = $turn->kind;
+        }
         $exchange->error = mb_substr($turn->error, 0, 8192);
         $exchange->stopReason = mb_substr($turn->stopReason, 0, 64);
         $exchange->inputTokens = $turn->inputTokens;
@@ -213,9 +398,17 @@ class TrafficIngester
         $exchange->messageCount = $turn->messageCount;
         $exchange->systemChars = $turn->systemChars;
         $exchange->toolsDeclared = $turn->toolsDeclared;
-        foreach ($turn->toolCalls as $call) {
-            $exchange->addToolCall(new ToolCall($exchange, mb_substr($call['callId'], 0, 128), mb_substr($call['name'], 0, 128), self::cut($call['input'], self::MAX_TOOL_INPUT)));
+        // Taken again (a retry, a reparse): calls already known keep their result, which came from a later request.
+        $known = [];
+        foreach ($exchange->getToolCalls() as $existing) {
+            $known[$existing->callId] = $existing;
         }
+        $calls = [];
+        foreach ($turn->toolCalls as $call) {
+            $callId = mb_substr($call['callId'], 0, 128);
+            $calls[] = $known[$callId] ?? new ToolCall($exchange, $callId, mb_substr($call['name'], 0, 128), self::cut($call['input'], self::MAX_TOOL_INPUT));
+        }
+        $exchange->replaceToolCalls($calls);
         $exchange->toolErrorCount = \count(array_filter($turn->toolResults, static fn (array $result) => true === $result['isError']));
         $this->answerToolCalls($turn->toolResults, $exchange->occurredAt);
     }
@@ -223,20 +416,21 @@ class TrafficIngester
     /** A file that could not be taken in: kept as it is in quarantine/, with the error in a .error file beside it. */
     private function quarantine(string $path, \Throwable $exception): void
     {
-        $directory = \dirname($this->archiveDirectory).'/quarantine';
+        $directory = $this->quarantineDirectory();
         if (!is_dir($directory) && !@mkdir($directory, 0o750, true) && !is_dir($directory)) {
-            return;
+            throw new ArchiveException('Cannot create the quarantine '.$directory, 0, $exception);
         }
         $target = $directory.'/'.basename($path);
-        if (@rename($path, $target)) {
-            file_put_contents($target.'.error', \sprintf("%s\n%s: %s\n", $this->clock->now()->format(\DATE_ATOM), $exception::class, $exception->getMessage()));
+        if (!@rename($path, $target)) {
+            throw new ArchiveException('Cannot move '.basename($path).' to the quarantine', 0, $exception);
         }
+        file_put_contents($target.'.error', \sprintf("%s\n%s: %s\n", $this->clock->now()->format(\DATE_ATOM), $exception::class, $exception->getMessage()));
     }
 
     /** @return list<string> files waiting in quarantine (Įspėjimai shows them) */
     public function quarantined(): array
     {
-        return array_map('basename', glob(\dirname($this->archiveDirectory).'/quarantine/*.log') ?: []);
+        return array_map('basename', glob($this->quarantineDirectory().'/*.log') ?: []);
     }
 
     /** @param list<array{callId: string, isError: ?bool, output: string}> $results */
@@ -262,12 +456,14 @@ class TrafficIngester
     {
         $entityManager = $this->doctrine->getManager();
         foreach ($this->exchanges->withoutAccount($this->clock->now()->modify('-1 day')) as $exchange) {
-            $usage = '' !== $exchange->requestTail
-                ? $this->usage->forRequest($exchange->requestTail, $exchange->occurredAt)
-                : $this->usage->forSession($exchange->sessionId, $exchange->occurredAt);
+            $websocket = str_ends_with($exchange->endpoint, '(ws)');
+            $usage = $websocket
+                ? $this->usage->forWebsocketTurn($exchange->requestTail, $exchange->sessionId, $exchange->occurredAt)
+                : $this->usage->forRequest($exchange->requestTail, $exchange->occurredAt);
             if (null === $usage) {
                 continue;
             }
+            $exchange->usageRecordId = $usage->getId();
             $exchange->authIndex = $usage->authIndex;
             $exchange->account = $usage->account;
             if ('' === $exchange->sessionId) {
@@ -281,8 +477,8 @@ class TrafficIngester
                     default => $exchange->kind,
                 };
             }
-            // CLIProxyAPI's own measure beats the log file's write time.
-            if ($usage->latencyMs > 0) {
+            // CLIProxyAPI's own measure beats the log file's write time (a WebSocket turn's timeline is exact already).
+            if ($usage->latencyMs > 0 && !$websocket) {
                 $exchange->durationMs = $usage->latencyMs;
             }
             if (0 === $exchange->inputTokens + $exchange->outputTokens) {
@@ -292,6 +488,8 @@ class TrafficIngester
                 $exchange->cacheCreationTokens = $usage->cacheCreationTokens;
                 $exchange->reasoningTokens = $usage->reasoningTokens;
             }
+            // Each link is visible to the next query: two turns never take the same record.
+            $entityManager->flush();
         }
         $entityManager->flush();
         $entityManager->clear();
@@ -316,17 +514,50 @@ class TrafficIngester
         $relative = $at->format('Y-m-d').'/'.$name.'.gz';
         $path = $this->archiveDirectory.'/'.$relative;
         if (!is_dir(\dirname($path)) && !@mkdir(\dirname($path), 0o750, true) && !is_dir(\dirname($path))) {
-            throw new \RuntimeException('Cannot create the archive directory '.\dirname($path));
+            throw new ArchiveException('Cannot create the archive directory '.\dirname($path));
         }
         $compressed = gzencode($text, 6);
         $temporary = $path.'.tmp';
         if (false === $compressed || \strlen($compressed) !== @file_put_contents($temporary, $compressed)) {
             @unlink($temporary);
-            throw new \RuntimeException('Cannot write the archive copy '.$temporary);
+            throw new ArchiveException('Cannot write the archive copy '.$temporary);
         }
         chmod($temporary, 0o600);
         if (!rename($temporary, $path)) {
-            throw new \RuntimeException('Cannot move the archive copy into place: '.$path);
+            throw new ArchiveException('Cannot move the archive copy into place: '.$path);
+        }
+
+        return $relative;
+    }
+
+    /** The same, read and compressed in pieces: for files too large to hold in memory. */
+    private function archiveStream(string $name, string $source, \DateTimeImmutable $at): string
+    {
+        $relative = $at->format('Y-m-d').'/'.$name.'.gz';
+        $path = $this->archiveDirectory.'/'.$relative;
+        if (!is_dir(\dirname($path)) && !@mkdir(\dirname($path), 0o750, true) && !is_dir(\dirname($path))) {
+            throw new ArchiveException('Cannot create the archive directory '.\dirname($path));
+        }
+        $temporary = $path.'.tmp';
+        $in = fopen($source, 'rb');
+        $out = gzopen($temporary, 'wb6');
+        if (false === $in || false === $out) {
+            throw new ArchiveException('Cannot stream '.$name.' into the archive');
+        }
+        while (!feof($in)) {
+            $chunk = fread($in, 1_048_576);
+            if (false === $chunk || ('' !== $chunk && false === gzwrite($out, $chunk))) {
+                fclose($in);
+                gzclose($out);
+                @unlink($temporary);
+                throw new ArchiveException('Cannot write the archive copy '.$temporary);
+            }
+        }
+        fclose($in);
+        gzclose($out);
+        chmod($temporary, 0o600);
+        if (!rename($temporary, $path)) {
+            throw new ArchiveException('Cannot move the archive copy into place: '.$path);
         }
 
         return $relative;

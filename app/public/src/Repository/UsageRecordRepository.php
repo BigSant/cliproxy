@@ -15,10 +15,11 @@ use Doctrine\Persistence\ManagerRegistry;
  */
 class UsageRecordRepository extends ServiceEntityRepository
 {
-    // A retry or a switch to another account is another record with the same request id: requests count the ids,
-    // attempts every record.
-    private const string SUMS = "COUNT(DISTINCT CASE WHEN request_id = '' THEN CAST(id AS CHAR) ELSE request_id END) AS requests,"
-        .' COUNT(*) AS attempts, SUM(CASE WHEN failed = 1 THEN 1 ELSE 0 END) AS failed,'
+    // A retry or a switch to another account is another record of the same request, marked is_retry: requests are the
+    // records without retries, failed requests the failed records whose failure no retry followed (failed − retries:
+    // every retry follows one failed attempt). Attempts are all records.
+    private const string SUMS = 'COUNT(*) - SUM(CASE WHEN is_retry = 1 THEN 1 ELSE 0 END) AS requests,'
+        .' COUNT(*) AS attempts, SUM(CASE WHEN failed = 1 THEN 1 ELSE 0 END) - SUM(CASE WHEN is_retry = 1 THEN 1 ELSE 0 END) AS failed,'
         .' SUM(input_tokens) AS input, SUM(output_tokens) AS output, SUM(cache_read_tokens) AS cache_read,'
         .' SUM(cache_creation_tokens) AS cache_creation, SUM(cache_creation5m_tokens) AS cache_5m,'
         .' SUM(cache_creation1h_tokens) AS cache_1h, SUM(total_tokens) AS total';
@@ -131,6 +132,29 @@ class UsageRecordRepository extends ServiceEntityRepository
     }
 
     /**
+     * The attempts already stored of these requests.
+     *
+     * @param list<string> $requestIds
+     *
+     * @return list<array{request_id: string, at: int, failed: bool}>
+     */
+    public function attemptsOf(array $requestIds): array
+    {
+        $rows = $this->getEntityManager()->getConnection()->createQueryBuilder()
+            ->select('request_id, occurred_at, failed')
+            ->from('usage_record')
+            ->where('request_id IN (:ids)')
+            ->setParameter('ids', $requestIds, \Doctrine\DBAL\ArrayParameterType::STRING)
+            ->fetchAllAssociative();
+
+        return array_map(static fn (array $row) => [
+            'request_id' => (string) $row['request_id'],
+            'at' => (new \DateTimeImmutable((string) $row['occurred_at'], new \DateTimeZone('UTC')))->getTimestamp(),
+            'failed' => (bool) $row['failed'],
+        ], $rows);
+    }
+
+    /**
      * The newest User-Agent of a real client per provider: the limits requests then look like that client.
      *
      * @return array<string, string>
@@ -180,25 +204,29 @@ class UsageRecordRepository extends ServiceEntityRepository
     }
 
     /**
-     * For requests whose log does not carry their own request id (a Codex WebSocket connection logs many in one file):
-     * the session's record closest after the request started.
+     * A Codex WebSocket turn's usage record: the connection's request id (all its turns share it) or, without one, the
+     * session; the first record not linked yet from shortly before the turn started (the record is written when the
+     * turn ends, after the timeline's request).
      */
-    public function forSession(string $sessionId, \DateTimeImmutable $at): ?UsageRecord
+    public function forWebsocketTurn(string $requestTail, string $sessionId, \DateTimeImmutable $at): ?UsageRecord
     {
-        if ('' === $sessionId) {
+        $query = $this->createQueryBuilder('u')
+            ->where('u.occurredAt BETWEEN :from AND :to')
+            ->andWhere('NOT EXISTS (SELECT 1 FROM App\Entity\Exchange e WHERE e.usageRecordId = u.id)')
+            ->setParameter('from', $at->modify('-2 seconds'), 'utc_datetime_immutable')
+            ->setParameter('to', $at->modify('+30 minutes'), 'utc_datetime_immutable')
+            ->orderBy('u.occurredAt', 'ASC')
+            ->addOrderBy('u.id', 'ASC')
+            ->setMaxResults(1);
+        if ('' !== $requestTail) {
+            $query->andWhere('u.requestTail = :tail')->setParameter('tail', $requestTail);
+        } elseif ('' !== $sessionId) {
+            $query->andWhere('u.sessionId = :session')->setParameter('session', $sessionId);
+        } else {
             return null;
         }
 
-        return $this->createQueryBuilder('u')
-            ->where('u.sessionId = :session')
-            ->andWhere('u.occurredAt BETWEEN :from AND :to')
-            ->setParameter('session', $sessionId)
-            ->setParameter('from', $at->modify('-1 minute'), 'utc_datetime_immutable')
-            ->setParameter('to', $at->modify('+30 minutes'), 'utc_datetime_immutable')
-            ->orderBy('u.occurredAt', 'ASC')
-            ->setMaxResults(1)
-            ->getQuery()
-            ->getOneOrNullResult();
+        return $query->getQuery()->getOneOrNullResult();
     }
 
     /** @return list<array<string, int|string>> */

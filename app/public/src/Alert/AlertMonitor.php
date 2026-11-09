@@ -15,8 +15,9 @@ use Symfony\Component\DependencyInjection\Attribute\Autowire;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
 
 /**
- * Turns what the collector sees into alerts: each condition has a stable id; a new one opens an alert (and a push
- * through ntfy when a topic is set in Nustatymai), one no longer seen is resolved. Nothing is deleted.
+ * Turns what the collector sees into alerts: each condition has a stable key; a new one opens an episode (and a push
+ * through ntfy when a topic is set in Nustatymai, retried until ntfy takes it), one no longer seen is resolved.
+ * Nothing is deleted.
  */
 class AlertMonitor
 {
@@ -46,18 +47,14 @@ class AlertMonitor
         $entityManager = $this->doctrine->getManager();
         $open = [];
         foreach ($this->alerts->open() as $alert) {
-            $open[$alert->id] = $alert;
+            $open[$alert->alertKey] = $alert;
         }
         foreach ($conditions as $id => $condition) {
-            $alert = $open[$id] ?? $this->alerts->find($id);
+            $alert = $open[$id] ?? null;
             if (null === $alert) {
+                // New, or back after it cleared: a new episode; the earlier ones stay as they ended.
                 $alert = new Alert($id, $condition['level'], $condition['message'], $now);
                 $entityManager->persist($alert);
-            } elseif (!$alert->isOpen()) {
-                // It came back: a new episode of the same condition.
-                $alert->firstSeenAt = $now;
-                $alert->resolvedAt = null;
-                $alert->notifiedAt = null;
             }
             $alert->level = $condition['level'];
             $alert->message = mb_substr($condition['message'], 0, 500);
@@ -140,7 +137,7 @@ class AlertMonitor
             return false;
         }
         try {
-            $this->httpClient->request('POST', $topic, [
+            $status = $this->httpClient->request('POST', $topic, [
                 'headers' => [
                     'Title' => ($resolved ? 'Išspręsta: ' : '').'CLIProxy hub',
                     'Priority' => $resolved ? 'low' : (Alert::ERROR === $alert->level ? 'high' : 'default'),
@@ -150,7 +147,8 @@ class AlertMonitor
                 'timeout' => 10,
             ])->getStatusCode();
 
-            return true;
+            // Not delivered unless ntfy took it: the next run tries again.
+            return $status >= 200 && $status < 300;
         } catch (\Throwable $exception) {
             $this->logger->warning('ntfy push failed: {error}', ['error' => $exception->getMessage()]);
 

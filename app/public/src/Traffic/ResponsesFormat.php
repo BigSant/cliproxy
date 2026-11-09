@@ -35,7 +35,9 @@ final class ResponsesFormat
         $turn->stream = (bool) ($request['stream'] ?? false);
         $turn->systemChars = mb_strlen((string) ($request['instructions'] ?? ''));
         $turn->toolsDeclared = \is_array($request['tools'] ?? null) ? \count($request['tools']) : 0;
-        $turn->sessionId = (string) ($request['prompt_cache_key'] ?? '');
+        // CLIProxyAPI names a session from prompt_cache_key "pck:<key>" (sdk/cliproxy/session/info.go); a client's
+        // Session_id header, when there is one, wins over it.
+        $turn->sessionId = isset($request['prompt_cache_key']) && '' !== $request['prompt_cache_key'] ? 'pck:'.$request['prompt_cache_key'] : '';
         $input = $request['input'] ?? [];
         if (\is_string($input)) {
             $input = [['type' => 'message', 'role' => 'user', 'content' => $input]];
@@ -151,7 +153,7 @@ final class ResponsesFormat
             $type = $event['type'] ?? null;
             if ('response.output_item.done' === $type && \is_array($event['item'] ?? null)) {
                 $items[] = $event['item'];
-            } elseif (\in_array($type, ['response.completed', 'response.failed', 'response.incomplete', 'response.created'], true) && \is_array($event['response'] ?? null)) {
+            } elseif (\in_array($type, ['response.completed', 'response.done', 'response.failed', 'response.incomplete', 'response.created'], true) && \is_array($event['response'] ?? null)) {
                 $response = $event['response'];
             } elseif ('error' === $type) {
                 $response['error'] = $event['error'] ?? ['message' => $event['message'] ?? 'error'];

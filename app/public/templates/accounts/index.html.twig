@@ -122,6 +122,7 @@
                         <dt>Auth index</dt><dd><code>{{ account.authIndex }}</code></dd>
                         <dt>Raktas atnaujintas</dt><dd>{{ account.lastRefresh|ago }}</dd>
                         <dt>Limitai</dt><dd>{% if row.snapshot %}{{ row.snapshot.fetchedAt|ago }} ({{ row.snapshot.source == 'live' ? 'iš tiekėjo' : 'iš paskutinio atsakymo antraščių' }}){% if row.snapshot.error %} · <span class="bad">{{ row.snapshot.error }}</span>{% endif %}{% else %}dar neperskaityti{% endif %}</dd>
+                        {% if quotaErrors[account.authIndex] is defined %}<dt>Limitų klaida</dt><dd class="bad">{{ quotaErrors[account.authIndex] }}</dd>{% endif %}
                         {% if account.statusMessage %}<dt>Būsena</dt><dd>{{ account.statusMessage }}</dd>{% endif %}
                         {% for cooldown in account.cooldowns %}<dt>Pauzė</dt><dd>{{ cooldown.scope }} {{ cooldown.model }}: {{ cooldown.reason }}, iki {{ cooldown.retryAt ? cooldown.retryAt|date('H:i') : '–' }}</dd>{% endfor %}
                     </dl>

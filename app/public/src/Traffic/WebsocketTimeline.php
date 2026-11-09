@@ -19,12 +19,15 @@ namespace App\Traffic;
  */
 final class WebsocketTimeline
 {
+    private const array ANSWER_EVENTS = ['response.created', 'response.output_item.done', 'response.completed', 'response.done',
+        'response.failed', 'response.incomplete', 'error'];
+
     /**
      * @return list<array{at: ?\DateTimeImmutable, endedAt: ?\DateTimeImmutable, request: array<string, mixed>, events: list<array<string, mixed>>, disconnect: string, bytes: int}>
      */
     public static function turns(string $section): array
     {
-        $parts = preg_split('/^Timestamp: (\S+)\nEvent: websocket\.([a-z_]+)\n/m', $section, -1, \PREG_SPLIT_DELIM_CAPTURE) ?: [];
+        $parts = preg_split('/^Timestamp: (\S+)\nEvent: websocket\.([a-z_.]+)\n/m', $section, -1, \PREG_SPLIT_DELIM_CAPTURE) ?: [];
         $turns = [];
         $current = null;
         for ($i = 1; $i + 2 < \count($parts); $i += 3) {
@@ -50,7 +53,10 @@ final class WebsocketTimeline
             $current['endedAt'] = $at ?? $current['endedAt'];
             if ('response' === $type) {
                 foreach (self::events($payload) as $event) {
-                    $current['events'][] = $event;
+                    // Only what makes the answer; the many *.delta events would only fill memory.
+                    if (\in_array($event['type'] ?? null, self::ANSWER_EVENTS, true)) {
+                        $current['events'][] = $event;
+                    }
                 }
                 $current['bytes'] += \strlen($payload);
             } elseif ('disconnect' === $type) {

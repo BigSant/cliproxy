@@ -21,16 +21,15 @@ class QuotaSnapshotRepository extends ServiceEntityRepository
      */
     public function latest(): array
     {
-        $newest = $this->createQueryBuilder('s')
-            ->select('MAX(s.id)')
-            ->groupBy('s.authIndex')
-            ->getQuery()
-            ->getSingleColumnResult();
-        if ([] === $newest) {
+        // By when it was measured, not by when it was saved: a late fallback from old headers must not win.
+        $rows = $this->getEntityManager()->getConnection()->fetchAllAssociative(
+            'SELECT s.id FROM quota_snapshot s JOIN (SELECT auth_index, MAX(fetched_at) AS newest FROM quota_snapshot GROUP BY auth_index) m'
+            .' ON m.auth_index = s.auth_index AND m.newest = s.fetched_at');
+        if ([] === $rows) {
             return [];
         }
         $latest = [];
-        foreach ($this->findBy(['id' => $newest]) as $snapshot) {
+        foreach ($this->findBy(['id' => array_map('intval', array_column($rows, 'id'))], ['id' => 'ASC']) as $snapshot) {
             $latest[$snapshot->authIndex] = $snapshot;
         }
 

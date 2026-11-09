@@ -24,6 +24,18 @@ class UsageRecordTest extends TestCase
         self::assertSame('2026-11-09 12:00:00', $record->occurredAt->format('Y-m-d H:i:s'));
     }
 
+    public function testTheClientKeyAndUnneededHeadersNeverReachStorage(): void
+    {
+        $record = UsageRecord::sanitize(['api_key' => 'cpa-0123456789abcdef', 'response_headers' => [
+            'Set-Cookie' => ['session=secret'], 'Anthropic-Organization-Id' => ['org'], 'Anthropic-Ratelimit-Unified-5h-Utilization' => ['0.2'],
+            'X-Codex-Primary-Used-Percent' => ['5'], 'Retry-After' => ['3'],
+        ]]);
+
+        self::assertSame('…cdef', $record['api_key']);
+        self::assertSame(['Anthropic-Ratelimit-Unified-5h-Utilization', 'X-Codex-Primary-Used-Percent', 'Retry-After'], array_keys($record['response_headers']));
+        self::assertSame($record, UsageRecord::sanitize($record), 'sanitizing twice changes nothing (replays keep their key)');
+    }
+
     public function testAnEmptyRecordStillLoads(): void
     {
         $record = UsageRecord::fromQueueRecord([]);

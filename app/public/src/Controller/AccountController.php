@@ -30,6 +30,7 @@ class AccountController extends AbstractController
         private readonly ManagementClient $client,
         private readonly QuotaSnapshotRepository $snapshots,
         private readonly ClockInterface $clock,
+        private readonly Settings $settings,
     ) {
     }
 
@@ -49,6 +50,7 @@ class AccountController extends AbstractController
             'rows' => AccountRows::build($accounts, $this->snapshots->latest(), $this->clock->now()),
             'providers' => self::PROVIDERS,
             'login' => $request->getSession()->get(self::LOGIN),
+            'quotaErrors' => (array) ($this->settings->get(\App\Settings\Settings::QUOTA_ERRORS) ?? []),
         ]);
     }
 

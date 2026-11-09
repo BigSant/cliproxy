@@ -51,8 +51,10 @@ class QuotaFetcher
         }
 
         // The headers are as old as the answer that carried them, not "now".
-        return new QuotaSnapshot($account->authIndex, $account->label(), $account->provider, $account->signalsObservedAt ?? $this->clock->now(),
-            self::fromHeaders($account->signals), 'headers', $account->planType, null, $error);
+        $observedAt = $account->signalsObservedAt ?? $this->clock->now();
+
+        return new QuotaSnapshot($account->authIndex, $account->label(), $account->provider, $observedAt,
+            self::fromHeaders($account->signals, $observedAt), 'headers', $account->planType, null, $error);
     }
 
     private function claude(Account $account, ?string $userAgent): QuotaSnapshot
@@ -152,28 +154,42 @@ class QuotaFetcher
     }
 
     /**
-     * The windows from the rate-limit headers of the last proxied answer (lower-case names).
+     * The windows from the rate-limit headers of an answer (lower-case names), seen at $at.
+     * - Claude: anthropic-ratelimit-unified-{5h,7d,7d_oi}-{utilization,reset}; utilization is a fraction (1.05 = 105 %),
+     *   7d_oi is the weekly Fable window.
+     * - Codex: x-codex-{primary,secondary}-used-percent, with the window's length in -window-minutes (300 = 5 h,
+     *   10080 = 7 d; without it primary is the 5-hour one) and its reset in -reset-at (Unix) or -reset-after-seconds.
      *
      * @param array<string, string> $signals
      *
      * @return list<QuotaWindow>
      */
-    public static function fromHeaders(array $signals): array
+    public static function fromHeaders(array $signals, ?\DateTimeImmutable $at = null): array
     {
         $windows = [];
-        foreach (['5h' => [QuotaWindow::FIVE_HOUR, '5 val.'], '7d' => [QuotaWindow::WEEK, '7 d.']] as $suffix => [$key, $label]) {
+        foreach (['5h' => [QuotaWindow::FIVE_HOUR, '5 val.'], '7d' => [QuotaWindow::WEEK, '7 d.'], '7d_oi' => [QuotaWindow::WEEK_FABLE, '7 d. Fable']] as $suffix => [$key, $label]) {
             $used = $signals["anthropic-ratelimit-unified-$suffix-utilization"] ?? null;
             if (null !== $used && is_numeric($used)) {
-                // Anthropic's headers give a fraction (0.42), its usage endpoint a percentage.
-                $windows[] = new QuotaWindow($key, $label, (float) $used <= 1.0 ? (float) $used * 100 : (float) $used,
+                $windows[] = new QuotaWindow($key, $label, (float) $used * 100,
                     self::instant($signals["anthropic-ratelimit-unified-$suffix-reset"] ?? null));
             }
         }
-        foreach (['primary' => [QuotaWindow::FIVE_HOUR, '5 val.'], 'secondary' => [QuotaWindow::WEEK, '7 d.']] as $name => [$key, $label]) {
+        foreach (['primary' => QuotaWindow::FIVE_HOUR, 'secondary' => QuotaWindow::WEEK] as $name => $default) {
             $used = $signals["x-codex-$name-used-percent"] ?? null;
-            if (null !== $used && is_numeric($used)) {
-                $windows[] = new QuotaWindow($key, $label, (float) $used, self::instant($signals["x-codex-$name-reset-at"] ?? null));
+            if (null === $used || !is_numeric($used)) {
+                continue;
             }
+            $key = match ((int) ($signals["x-codex-$name-window-minutes"] ?? 0)) {
+                300 => QuotaWindow::FIVE_HOUR,
+                10080 => QuotaWindow::WEEK,
+                default => $default,
+            };
+            $reset = self::instant($signals["x-codex-$name-reset-at"] ?? null);
+            $after = $signals["x-codex-$name-reset-after-seconds"] ?? null;
+            if (null === $reset && null !== $at && null !== $after && is_numeric($after)) {
+                $reset = $at->modify('+'.(int) $after.' seconds');
+            }
+            $windows[] = new QuotaWindow($key, QuotaWindow::FIVE_HOUR === $key ? '5 val.' : '7 d.', (float) $used, $reset);
         }
 
         return $windows;

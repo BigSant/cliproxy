@@ -35,10 +35,11 @@ Symfony 8.1 skydelis.
   kiekvieną paleidimą per management API užtikrina duomenų politiką (`usage-statistics-enabled`, eilės 1 h,
   `logs-max-total-size-mb: 0`, `error-logs-max-files: 0`), o vieną kartą – `session-affinity-rebind-on: quota` ir
   `upstream.claude.model-level-cooling: true` (toliau – tavo pasirinkimas).
-- **`CLIPROXY_CONFIG_REV`** (`env/common.env`) – `app/config/cliproxy/*` maiša; ji yra konteinerio aplinkoje, todėl
-  pakeitus `entrypoint.sh` ar šabloną deploy'us konteinerį perkuria. CI (`checks.yml`, lint) atmeta pasenusią reikšmę;
-  komanda jai apskaičiuoti – `env/common.env` komentare.
-- **Health** (`/_health`) tikrina DB ir CLIProxyAPI; kuriam nors neveikiant – 503, todėl deploy'us grąžinamas.
+- **`CLIPROXY_CONFIG_REV`** (`env/common.env`) – `entrypoint.sh` maiša; ji yra konteinerio aplinkoje, todėl pakeitus
+  `entrypoint.sh` deploy'us konteinerį perkuria. Šablonas į maišą neįeina: jis veikia tik tuščią katalogą, o be reikalo
+  perkurtas CLIProxyAPI nutrauktų vykstančias sesijas. CI (`checks.yml`, lint) atmeta pasenusią reikšmę.
+- **Health** (`/_health`) tikrina DB ir CLIProxyAPI (su priimtu management raktu – 401 nėra „veikia“); CLIProxyAPI
+  po perkūrimo laukiama iki 20 s. Kuriam nors neveikiant – 503, todėl deploy'us grąžinamas.
 - Prieiga: **tik šis kompiuteris** (`127.0.0.1`). Iš kito kompiuterio – SSH tunelis
   `ssh -N -L 8317:127.0.0.1:8317 cachyos-x8664`. Tailscale galima pridėti vėliau (`tailscale serve --bg
   --https=8317 http://127.0.0.1:8317`).
@@ -83,12 +84,14 @@ per CLIProxyAPI `/requests/api-call` su paskyros raktu klausia tiekėjo:
 - Claude – `https://api.anthropic.com/api/oauth/usage` (`five_hour`, `seven_day`, `iguana_necktie` = 7 d. Fable);
 - Codex – `https://chatgpt.com/backend-api/wham/usage` (pirminis ir antrinis langas, sukaupti atstatymai).
 
-Užklausų antraštėse jau yra `x-…` ir `anthropic-ratelimit-unified-*` reikšmės: usage įrašo `response_headers` iš
+Užklausų antraštėse jau yra `x-codex-*` ir `anthropic-ratelimit-unified-*` reikšmės (Claude `5h`, `7d`, `7d_oi` = Fable;
+trupmenos; Codex – `used-percent`, `window-minutes`, `reset-at` arba `reset-after-seconds`): usage įrašo `response_headers` iš
 kiekvieno atsakymo duoda **pasyvią** nuotrauką (ne dažniau nei kartą per minutę paskyrai, be papildomo kvietimo
 tiekėjui; Fable langas perimamas iš paskutinės pilnos). Taip prioritetai atnaujinami vos keičiantis limitams, o
 aktyvus skaitymas lieka kas 5 min. su naujausio tikro kliento User-Agent. Nepavykus aktyviam skaitymui – paskutinio
-atsakymo antraštės su jų pačių laiku. Langas, kurio `resets_at` jau praėjo, laikomas tuščiu. Nuotraukos laikomos
-visam laikui.
+atsakymo antraštės su jų pačių laiku – tik jei jos naujesnės nei žinoma (paskutinė nuotrauka renkama pagal matavimo laiką,
+ne įrašymo), trūkstami langai perimami. Skaitymo klaidos rodomos Paskyrose. Langas, kurio `resets_at` jau praėjo,
+laikomas tuščiu. Nuotraukos laikomos visam laikui.
 
 ### Kvotų prognozė
 
@@ -111,17 +114,27 @@ header'iai užmaskuoti). Kolektorius (`src/Traffic/`) kas 5 s paima baigtus fail
 - įrankio rezultatas ateina **kitoje** užklausoje: Claude – `tool_result.is_error`, Codex – komandos `exit_code`
   (nėra – „neaišku“); jis pažymimas prie to kvietimo (`tool_call`);
 - Codex per **WebSocket** (`supports_websockets = true`): CLIProxyAPI visam ryšiui rašo vieną failą, kai ryšys
-  užsidaro, su `=== WEBSOCKET TIMELINE ===` (`websocket.request` / `response` / `disconnect` įvykiai). Kiekvienas
-  `response.create` su po jo einančiais įvykiais tampa atskiru įrašu (`<failas>#N`); paskyra – pagal sesiją ir laiką;
+  užsidaro, su `=== WEBSOCKET TIMELINE ===` (`websocket.request` / `response` / `disconnect` / `interrupt…` įvykiai).
+  Kiekvienas `response.create` su po jo einančiais įvykiais tampa atskiru įrašu (`<failas>#N`; laikomi tik atsakymą
+  sudarantys įvykiai, ne `*.delta`; `response.completed` ar `response.done` – pabaiga; `generate:false` – prewarm, tipas
+  `side`). Visi ryšio usage įrašai turi bendrą request id: turn'ai juos ima iš eilės, kiekvieną tik vieną kartą
+  (`exchange.usage_record_id`);
 - paskyra, sesija, tipas ir CLIProxyAPI trukmė – iš usage įrašo su ta pačia request id pabaiga (failo vardo
   paskutiniai 8 simboliai). **Tipas**: `main`, `subagent` (`parent_session_id`), `compaction`, `fork` (CLIProxyAPI
   `node_kind`), `side` (kliento patikros, `max_tokens ≤ 1`); „prompt'ai“ skaičiuojami tik `main`;
 - iš prompt'o išimami klientų įterpti blokai (`<system-reminder>`, `<environment_context>` ir pan.); originalas –
   archyve;
-- failas, kurio nepavyksta perskaityti, nestabdo kitų: jis perkeliamas į `cliproxy-traffic/quarantine/` su `.error`
-  šalia ir parodomas Įspėjimuose; archyvas rašomas per laikiną failą, o originalas trinamas tik po archyvo ir DB.
-  Tą patį failą paėmus dar kartą jo įrašai pakeičiami, ne pridedami;
-- paieška – MySQL FULLTEXT (prompt, atsakymas, mąstymas, klaida); eksportas – pagal id (keyset).
+- failas, kurio turinio nepavyksta perskaityti, nestabdo kitų: jis perkeliamas į `cliproxy-traffic/quarantine/` su
+  `.error` šalia; DB ar disko klaida – ne failo kaltė: praėjimas sustoja, failas lieka `logs/`. Jei procesas du kartus
+  žuvo ties tuo pačiu failu (atmintis; `logs/.ingesting`), failas eina į karantiną. Grąžinti – Įspėjimai → „Bandyti
+  karantino failus dar kartą“ arba `app:traffic:retry`. Didesnis nei 256 MB failas archyvuojamas srautu ir
+  neišskaidomas. Archyvas rašomas per laikiną failą, originalas trinamas tik po archyvo ir DB. Tą patį failą paėmus dar
+  kartą įrašai pakeičiami, o jau gauti įrankių rezultatai išlieka;
+- `app:traffic:reparse [--from=YYYY-MM-DD]` perskaito archyvą iš naujo dabartiniu parseriu (seni įrašai gauna WS
+  skaidymą, švarius prompt'us, tipus), išsaugodamas rezultatus ir susiejimus;
+- paieška – visi žodžiai turi būti: 3+ simbolių ne stop-žodžiai per MySQL FULLTEXT (prefiksai, `MATCH_AGAINST` toje pačioje
+  užklausoje kaip filtrai – rezultatai nekarpomi), trumpesni ir stop-žodžiai – kaip poeilutė; eksportas – pagal id
+  (keyset).
 
 Lentelėse `exchange` ir `tool_call` ilgi tekstai trumpinami (prompt'as 64 KB, mąstymas ir atsakymas 256 KB); pilnas
 tekstas lieka žaliame faile, kuris suspaudžiamas į `cliproxy-traffic/archive/<diena>/` ir iš `logs/` pašalinamas.
@@ -144,12 +157,17 @@ prioritetai perrašomi.
 Apžvalgoje ir Įspėjimuose, kiti dirba toliau.
 
 1. Kas 5 s – usage įrašai iš CLIProxyAPI eilės (`/observability/usage/queue`; paimti iš eilės dingsta). Kiekvienas
-   paketas **pirma** prirašomas į spool'ą `cliproxy-traffic/usage/YYYY-MM-DD.jsonl` (fsync), tik tada į DB. Įrašas
-   saugomas visas (`usage_record.raw`, plius `ttft_ms`, `user_agent`, `reasoning_effort`, `parent_session_id`,
-   `node_kind`, …), `record_key` (sha1) neleidžia dublikatų. Nepavykus DB įrašymui diena pažymima ir kitas paleidimas
-   ją įrašo iš spool'o; ranka – `php bin/console app:usage:replay <diena>|--all`. „Užklausos“ skaičiuoja skirtingus
-   request id (pakartojimas ar kita paskyra – tas pats `request_id`), „bandymai“ – visus įrašus.
-2. Kas 5 s – request log'ai į žurnalą ir archyvą; kartą per paleidimą – paskyrų susiejimas.
+   paketas išvalomas (kliento raktas – tik `…` + 4 paskutiniai simboliai, iš atsakymo antraščių lieka tik limitų,
+   retry ir request id), **pirma** prirašomas į spool'ą `cliproxy-traffic/usage/YYYY-MM-DD.jsonl` (0600, fsync), diena
+   pažymima „laukia“, tada įrašoma į DB ir žymė nuimama (write-ahead): lūžus procesui ar DB kitas paleidimas dieną
+   įrašo pats; DB neveikiant eilė vis tiek imama (į spool'ą), kad CLIProxyAPI jos nepamestų. Kas valandą šiandiena ir
+   vakar dar kartą (pigu, idempotentiška). Įrašas saugomas visas (`usage_record.raw`, plius `ttft_ms`, `user_agent`,
+   `reasoning_effort`, `parent_session_id`, `node_kind`, …), `record_key` (sha1) neleidžia dublikatų. Ranka –
+   `php bin/console app:usage:replay <diena>|--all` (bendras lock'as). Bandymas, einantis po to paties `request_id`
+   nepavykusio bandymo, žymimas `is_retry`: „užklausos“ = įrašai − pakartojimai, „nepavyko“ = nepavykę − pakartojimai,
+   „bandymai“ = visi (Codex WebSocket turn'ai turi bendrą `request_id`, bet nėra pakartojimai).
+2. Kas 5 s – request log'ai į žurnalą ir archyvą; kartą per paleidimą – paskyrų susiejimas, „našlaičių“ WS dalių
+   (`logs/request-log-parts-*`, valandą nekeistų) perkėlimas į `archive/orphans/<diena>/`.
 3. Kai laikas arba paspaudus „Perskaityti“ – limitai (`quota_snapshot`) ir prioritetai.
 4. Kartą per paleidimą – konfigūracijos bazė, CLIProxyAPI versija (naujausia – kas 6 val.), įspėjimai, heartbeat.
 
@@ -160,10 +178,15 @@ cliproxy-<env>-cron php -d memory_limit=2G bin/console app:collect --quotas`.
 
 `src/Alert/AlertMonitor.php`, puslapis „Įspėjimai“ (skaičius šoninėje juostoje): paskyrai reikia prisijungti iš naujo,
 paskyros klaida, tiekėjas be nė vienos laisvos paskyros, CLIProxyAPI neatsako, usage nepavyko įrašyti, failai
-karantine, diske < 10 % vietos, nauja CLIProxyAPI versija. Įspėjimas atsidaro ir užsidaro pats; istorija lieka.
-Nustatymuose įrašius **ntfy** temos adresą (`https://ntfy.sh/<tema>`) kiekvienas naujas (ir išspręstas) klaidos ar
-dėmesio įspėjimas siunčiamas į telefoną. Kolektoriui sustojus (> 3 min. be heartbeat) kiekvienas puslapis rodo
-juostą.
+karantine, diske < 10 % vietos, nauja CLIProxyAPI versija. Kiekvienas įspėjimo pasikartojimas – atskiras epizodas,
+ankstesni lieka. CLIProxyAPI neatsakant paskyrų įspėjimai neuždaromi (nežinoma ≠ gerai). Nustatymuose įrašius **ntfy**
+temos adresą (`https://ntfy.sh/<tema>`) kiekvienas naujas (ir išspręstas) klaidos ar dėmesio įspėjimas siunčiamas į
+telefoną; ntfy nepriėmus – bandoma kitą kartą.
+
+**Watchdog** (`app:watchdog`, atskira cron eilutė kas 5 min.) nepriklauso nuo kolektoriaus, jo lock'o ir DB: kolektorius
+kiekvieną ciklą palieka `cliproxy-traffic/.heartbeat` ir ntfy adreso kopiją `.ntfy`; watchdog tikrina heartbeat
+(> 5 min.), DB ir CLIProxyAPI ir pats siunčia į ntfy (`.watchdog-state` – kas jau pranešta). Kolektoriui sustojus
+(> 3 min. be heartbeat) kiekvienas puslapis rodo juostą.
 
 ## Įrankių nukreipimas į hub'ą
 

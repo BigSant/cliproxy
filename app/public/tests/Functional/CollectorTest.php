@@ -130,6 +130,55 @@ class CollectorTest extends KernelTestCase
         self::assertSame('quota', $patch[0]['body']['routing']['session-affinity-rebind-on'] ?? null, 'the configuration baseline went to CLIProxyAPI');
     }
 
+    public function testADayLeftPendingByACrashIsStoredByTheNextPass(): void
+    {
+        // A run died after the spool and before the database: the day is marked, the record only in the spool.
+        $spool = self::getContainer()->get(UsageSpool::class);
+        $day = $spool->append([['timestamp' => '2026-11-09T12:00:00Z', 'request_id' => 'lost', 'provider' => 'claude']], new \DateTimeImmutable());
+        $spool->markPending($day);
+        self::assertSame('600', substr(sprintf('%o', fileperms("/tmp/cliproxy-test/usage/$day.jsonl")), -3), 'owner only');
+
+        self::assertSame(1, self::getContainer()->get(Collector::class)->collectUsage());
+        self::assertSame([], $spool->pendingDays());
+    }
+
+    public function testRetriesAreAttemptsNotRequests(): void
+    {
+        $this->cliProxy->queue = [
+            // A failed attempt and its retry on another account: one request, not failed.
+            ['timestamp' => '2026-11-09T12:00:00Z', 'request_id' => 'req-r', 'provider' => 'claude', 'failed' => true],
+            ['timestamp' => '2026-11-09T12:00:05Z', 'request_id' => 'req-r', 'provider' => 'claude', 'auth_index' => 'b'],
+            // A WebSocket connection: two successful turns sharing the request id are two requests.
+            ['timestamp' => '2026-11-09T12:01:00Z', 'request_id' => 'conn', 'provider' => 'codex'],
+            ['timestamp' => '2026-11-09T12:02:00Z', 'request_id' => 'conn', 'provider' => 'codex'],
+            // Failed twice: one failed request.
+            ['timestamp' => '2026-11-09T12:03:00Z', 'request_id' => 'req-f', 'provider' => 'claude', 'failed' => true],
+            ['timestamp' => '2026-11-09T12:03:02Z', 'request_id' => 'req-f', 'provider' => 'claude', 'failed' => true, 'auth_index' => 'b'],
+        ];
+        self::getContainer()->get(Collector::class)->collectUsage();
+
+        $totals = self::getContainer()->get(\App\Repository\UsageRecordRepository::class)->totals(new \DateTimeImmutable('2026-11-09T00:00:00Z'));
+        self::assertSame([6, 4, 1], [$totals['attempts'], $totals['requests'], $totals['failed']]);
+    }
+
+    public function testAFallbackFromOldHeadersDoesNotReplaceANewerReading(): void
+    {
+        $this->cliProxy->credentials = [FakeCliProxy::credential('claude', 'a@x', ['quota' => [
+            'observed_at' => '2026-11-09T11:40:00Z', 'signals' => ['Anthropic-Ratelimit-Unified-5h-Utilization' => '0.6'],
+        ]])];
+        $this->entityManager->persist(new QuotaSnapshot('idx-a@x', 'a@x', 'claude', new \DateTimeImmutable('2026-11-09T12:00:00Z'),
+            [new \App\Quota\QuotaWindow('5h', '5 val.', 95, null)], 'headers'));
+        $this->entityManager->flush();
+
+        // The live read fails (no provider answer in the fake): the fallback is older than what is known.
+        self::getContainer()->get(Collector::class)->refreshQuotas();
+
+        $latest = self::getContainer()->get(\App\Repository\QuotaSnapshotRepository::class)->latest()['idx-a@x'];
+        self::assertSame(95.0, $latest->window('5h')?->used);
+        self::assertSame(1, $this->entityManager->getRepository(QuotaSnapshot::class)->count([]));
+        self::assertStringContainsString('Provider answered 500', (string) (self::getContainer()->get(Settings::class)->get(Settings::QUOTA_ERRORS)['idx-a@x'] ?? ''));
+    }
+
     public function testNothingOldIsDeleted(): void
     {
         $this->entityManager->persist(UsageRecord::fromQueueRecord(['timestamp' => '2020-01-01T00:00:00Z', 'provider' => 'claude']));

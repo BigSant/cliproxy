@@ -16,6 +16,7 @@ use Doctrine\ORM\Mapping as ORM;
 #[ORM\Index(name: 'exchange_occurred', columns: ['occurred_at'])]
 #[ORM\Index(name: 'exchange_session', columns: ['session_id', 'occurred_at'])]
 #[ORM\Index(name: 'exchange_request', columns: ['request_tail'])]
+#[ORM\Index(name: 'exchange_usage', columns: ['usage_record_id'])]
 #[ORM\Index(name: 'exchange_fulltext', columns: ['prompt', 'answer', 'thinking', 'error'], flags: ['fulltext'])]
 class Exchange
 {
@@ -45,6 +46,9 @@ class Exchange
     public string $authIndex = '';
     #[ORM\Column(length: 190)]
     public string $account = '';
+    /** The usage record this exchange was linked to: one record serves one exchange. */
+    #[ORM\Column(type: Types::BIGINT, nullable: true)]
+    public ?string $usageRecordId = null;
     #[ORM\Column]
     public bool $stream = false;
     #[ORM\Column]
@@ -123,10 +127,20 @@ class Exchange
         return $this->toolCalls;
     }
 
-    public function clearToolCalls(): void
+    /** @param list<ToolCall> $calls the exchange's calls now; those not among them are removed */
+    public function replaceToolCalls(array $calls): void
     {
-        $this->toolCalls->clear();
-        $this->toolCallCount = 0;
+        foreach ($this->toolCalls->toArray() as $existing) {
+            if (!\in_array($existing, $calls, true)) {
+                $this->toolCalls->removeElement($existing);
+            }
+        }
+        foreach ($calls as $call) {
+            if (!$this->toolCalls->contains($call)) {
+                $this->toolCalls->add($call);
+            }
+        }
+        $this->toolCallCount = $this->toolCalls->count();
     }
 
     public function addToolCall(ToolCall $call): void
