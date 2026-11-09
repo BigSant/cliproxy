@@ -11,13 +11,21 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 #[AsCommand(name: 'app:traffic:retry', description: 'Give quarantined request logs another try (the next collector pass takes them)')]
 class TrafficRetryCommand
 {
-    public function __construct(private readonly TrafficIngester $ingester)
-    {
+    public function __construct(
+        private readonly TrafficIngester $ingester,
+        private readonly \Symfony\Component\Lock\LockFactory $lockFactory,
+    ) {
     }
 
     public function __invoke(SymfonyStyle $io, #[Argument(description: 'One file; all when left out')] ?string $file = null): int
     {
-        $io->writeln(\sprintf('%d files back in logs/.', $this->ingester->retryQuarantined($file)));
+        $lock = $this->lockFactory->createLock(TrafficIngester::LOCK, ttl: 300);
+        $lock->acquire(true);
+        try {
+            $io->writeln(\sprintf('%d files back in logs/.', $this->ingester->retryQuarantined($file)));
+        } finally {
+            $lock->release();
+        }
 
         return 0;
     }

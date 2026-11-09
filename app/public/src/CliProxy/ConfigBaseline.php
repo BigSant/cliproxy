@@ -66,17 +66,19 @@ class ConfigBaseline
         $violations = [];
         $logs = (array) ($config['observability']['logs'] ?? []);
         $usage = (array) ($config['observability']['usage'] ?? []);
-        if ((int) ($logs['logs-max-total-size-mb'] ?? 0) > 0 || (int) ($logs['error-logs-max-files'] ?? 0) > 0) {
-            $violations[] = 'log failų valymas (logs-max-total-size-mb, error-logs-max-files turi būti 0)';
+        // Explicit values only: CLIProxyAPI's defaults for a missing key are not the hub's policy.
+        if (0 !== ($logs['logs-max-total-size-mb'] ?? null) || 0 !== ($logs['error-logs-max-files'] ?? null)) {
+            $violations[] = 'log failų valymas (observability.logs: logs-max-total-size-mb ir error-logs-max-files turi būti nurodyti ir lygūs 0)';
         }
-        if (false === ($usage['usage-statistics-enabled'] ?? true)) {
-            $violations[] = 'usage statistika išjungta';
+        if (true !== ($usage['usage-statistics-enabled'] ?? null)) {
+            $violations[] = 'usage statistika neįjungta (observability.usage.usage-statistics-enabled: true)';
         }
-        if ($requestLog && false === ($logs['request-log'] ?? true)) {
-            $violations[] = 'request-log išjungtas (išjunk Nustatymuose → Srauto žurnalas, jei tikrai reikia)';
+        if ($requestLog && true !== ($logs['request-log'] ?? null)) {
+            $violations[] = 'request-log neįjungtas (observability.logs.request-log: true; išjunk Nustatymuose → Srauto žurnalas, jei tikrai reikia)';
         }
-        if ([] === ($config['access']['api-keys'] ?? null)) {
-            $violations[] = 'tuščias klientų raktų sąrašas išjungtų autentifikaciją';
+        $keys = $config['access']['api-keys'] ?? null;
+        if (!\is_array($keys) || [] === array_filter($keys, static fn ($key) => \is_string($key) && '' !== trim($key))) {
+            $violations[] = 'nėra nė vieno kliento rakto (access.api-keys) – autentifikacija būtų išjungta';
         }
 
         return $violations;

@@ -78,7 +78,8 @@ class FakeCliProxy
 
     private function yaml(): string
     {
-        return $this->savedYaml ?? "config-version: 8\naccess:\n  api-keys: [\"".implode('", "', $this->config['access']['api-keys'] ?? [])."\"]\n";
+        return $this->savedYaml ?? "config-version: 8\naccess:\n  api-keys: [\"".implode('", "', $this->config['access']['api-keys'] ?? [])."\"]\n"
+            ."observability:\n  usage:\n    usage-statistics-enabled: true\n  logs:\n    request-log: true\n    logs-max-total-size-mb: 0\n    error-logs-max-files: 0\n";
     }
 
     /** @param array<string, mixed> $options */

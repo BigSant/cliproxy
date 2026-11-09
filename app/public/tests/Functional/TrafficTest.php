@@ -131,6 +131,22 @@ class TrafficTest extends WebTestCase
         self::assertStringEndsWith('#1', $first->logFile);
     }
 
+    public function testAWebsocketTurnWithoutItsRecordDoesNotTakeTheNextTurns(): void
+    {
+        $this->write('v1-responses-2026-11-09T151000-wwww9999.log', RequestLogs::codexWebsocket());
+        // Only the second turn's record came (the first one's was lost upstream).
+        $this->entityManager->persist(UsageRecord::fromQueueRecord(['timestamp' => '2026-11-09T13:00:45Z', 'request_id' => 'conn-wwww9999', 'auth_index' => 'idx-c',
+            'source' => 'second@example.com', 'session_id' => 'ws-session', 'provider' => 'codex']));
+        $this->entityManager->flush();
+        $ingester = self::getContainer()->get(TrafficIngester::class);
+        $ingester->ingest();
+        $ingester->linkAccounts();
+
+        [$first, $second] = $this->entityManager->getRepository(Exchange::class)->findBy([], ['occurredAt' => 'ASC']);
+        self::assertSame('', $first->account, 'its window ends where the next turn starts');
+        self::assertSame('second@example.com', $second->account);
+    }
+
     public function testTakingAFileAgainReplacesItsRowsInsteadOfAdding(): void
     {
         $this->write('v1-messages-2026-11-09T150000-aaaa1111.log', RequestLogs::claudeToolUse());

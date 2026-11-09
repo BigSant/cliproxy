@@ -82,16 +82,30 @@ class CollectCommand
             $this->step($name, $action);
             $lock->refresh();
         };
+        // Traffic steps run only while no reparse or retry holds the request logs; they wait for the next pass.
+        $trafficLock = $this->lockFactory->createLock(TrafficIngester::LOCK, ttl: 300);
+        $traffic = function (callable $action) use ($trafficLock) {
+            return function () use ($trafficLock, $action) {
+                if (!$trafficLock->acquire()) {
+                    return;
+                }
+                try {
+                    $action();
+                } finally {
+                    $trafficLock->release();
+                }
+            };
+        };
         try {
             $step('config', fn () => $this->configBaseline->apply());
             $step('version', fn () => $this->checkVersion());
-            $step('quarantine', function () use ($io) {
+            $step('quarantine', $traffic(function () use ($io) {
                 if (true === $this->settings->get(Settings::QUARANTINE_RETRY_REQUESTED)) {
                     $this->settings->set(Settings::QUARANTINE_RETRY_REQUESTED, false);
                     $io->writeln(\sprintf('%d quarantined logs back in logs/.', $this->traffic->retryQuarantined()));
                 }
-            });
-            $step('orphans', fn () => $this->traffic->collectOrphans());
+            }));
+            $step('orphans', $traffic(fn () => $this->traffic->collectOrphans()));
             do {
                 $step('usage', function () use ($io) {
                     $stored = $this->collector->collectUsage();
@@ -99,12 +113,12 @@ class CollectCommand
                         $io->writeln(\sprintf('Stored %d usage records.', $stored));
                     }
                 });
-                $step('traffic', function () use ($io) {
+                $step('traffic', $traffic(function () use ($io) {
                     $logs = $this->collector->collectTraffic();
                     if ($logs > 0) {
                         $io->writeln(\sprintf('Took in %d request logs.', $logs));
                     }
-                });
+                }));
                 $step('quotas', function () use ($io, &$quotas) {
                     if ($quotas || $this->collector->quotasDue()) {
                         $quotas = false;
@@ -118,7 +132,7 @@ class CollectCommand
                 }
                 sleep($interval);
             } while (true);
-            $step('link', fn () => $this->collector->linkTraffic());
+            $step('link', $traffic(fn () => $this->collector->linkTraffic()));
             $step('alerts', fn () => $this->raiseAlerts());
         } finally {
             $lock->release();
@@ -174,7 +188,13 @@ class CollectCommand
             }
         }
         if (isset($this->errors['usage']) && !isset($conditions['cliproxy'])) {
-            $conditions['collector:usage'] = ['level' => Alert::WARNING, 'message' => 'Usage įrašų nepavyko įrašyti: '.$this->errors['usage'].' (jie saugūs spool\'e ir bus įrašyti vėliau).'];
+            $conditions['collector:usage'] = ['level' => Alert::WARNING, 'message' => 'Usage įrašų nepavyko įrašyti: '.$this->errors['usage']
+                .($this->spool->writable() ? ' (jie spool\'e ir bus įrašyti vėliau).' : ' Spool\'o irgi nepavyksta rašyti – įrašai paliekami CLIProxyAPI eilėje (ji juos laiko valandą).')];
+        }
+        $broken = (array) ($this->settings->get(Settings::USAGE_BROKEN_LINES) ?? []);
+        if ([] !== $broken) {
+            $conditions['usage:broken'] = ['level' => Alert::WARNING, 'message' => 'Usage spool\'e yra neperskaitomų (nutrūkusių) eilučių: '
+                .implode(', ', array_map(static fn ($day, $count) => "$day – $count", array_keys($broken), $broken)).'. Jos paliktos faile.'];
         }
         if ([] !== $this->spool->pendingDays()) {
             $conditions['usage:pending'] = ['level' => Alert::WARNING, 'message' => 'Usage spool laukia pakartotinio įrašymo: '.implode(', ', $this->spool->pendingDays()).'.'];

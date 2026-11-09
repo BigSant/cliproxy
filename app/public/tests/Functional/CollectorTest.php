@@ -230,6 +230,35 @@ class CollectorTest extends KernelTestCase
         self::assertSame(1, self::getContainer()->get(Collector::class)->collectUsage());
     }
 
+    public function testWithNeitherTheDatabaseNorTheSpoolTheQueueIsLeftAlone(): void
+    {
+        $this->cliProxy->queue = [['timestamp' => '2026-11-09T12:00:00Z', 'request_id' => 'r1', 'provider' => 'claude']];
+        $this->entityManager->getConnection()->executeStatement('ALTER TABLE usage_record RENAME TO usage_record_away');
+        // The spool directory cannot be made: a file stands in its place.
+        file_put_contents('/tmp/cliproxy-test/usage', '');
+        try {
+            self::getContainer()->get(Collector::class)->collectUsage();
+            self::fail('the failure is reported');
+        } catch (\RuntimeException) {
+        } finally {
+            unlink('/tmp/cliproxy-test/usage');
+            $this->entityManager->getConnection()->executeStatement('ALTER TABLE usage_record_away RENAME TO usage_record');
+        }
+
+        self::assertCount(1, $this->cliProxy->queue, 'still in CLIProxyAPI\'s queue');
+    }
+
+    public function testALineACrashCutShortStaysOnItsOwnAndIsReported(): void
+    {
+        $spool = self::getContainer()->get(UsageSpool::class);
+        $day = $spool->append([['timestamp' => '2026-11-09T12:00:00Z', 'request_id' => 'a', 'provider' => 'claude']], new \DateTimeImmutable('2026-11-09T12:00:00Z'));
+        file_put_contents("/tmp/cliproxy-test/usage/$day.jsonl", '{"timestamp":"2026-11-09T12:00:01Z","requ', \FILE_APPEND);
+        $spool->append([['timestamp' => '2026-11-09T12:00:02Z', 'request_id' => 'b', 'provider' => 'claude']], new \DateTimeImmutable('2026-11-09T12:00:02Z'));
+
+        self::assertSame(2, self::getContainer()->get(Collector::class)->replay($day), 'the next record is not glued to the cut line');
+        self::assertSame([$day => 1], self::getContainer()->get(Settings::class)->get(Settings::USAGE_BROKEN_LINES));
+    }
+
     public function testNothingOldIsDeleted(): void
     {
         $this->entityManager->persist(UsageRecord::fromQueueRecord(['timestamp' => '2020-01-01T00:00:00Z', 'provider' => 'claude']));

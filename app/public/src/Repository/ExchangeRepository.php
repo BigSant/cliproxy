@@ -171,6 +171,7 @@ class ExchangeRepository extends ServiceEntityRepository
     {
         return $this->createQueryBuilder('e')
             ->where("e.authIndex = ''")
+            ->andWhere("e.kind <> 'superseded'")
             ->andWhere("e.requestTail <> '' OR e.sessionId <> ''")
             ->andWhere('e.usageRecordId IS NULL')
             ->andWhere('e.occurredAt >= :since')

@@ -63,6 +63,12 @@ class Collector
         }
         $done = $failed = [];
         do {
+            // Taken records need one place at least: with neither the spool nor the database writable they stay in
+            // CLIProxyAPI's queue (it keeps them an hour) instead of being taken into nowhere.
+            if (!$this->spool->writable() && !$this->databaseReachable()) {
+                $failure ??= new \RuntimeException('Neither the usage spool nor the database can take records: they wait in CLIProxyAPI\'s queue');
+                break;
+            }
             $records = array_map(UsageRecord::sanitize(...), $this->client->takeUsage(self::BATCH));
             // (store() sanitizes again: idempotent, and replays of older spool lines need it.)
             if ([] === $records) {
@@ -108,11 +114,28 @@ class Collector
     }
 
     /** @return int the records of the day the database did not have yet */
+    private function databaseReachable(): bool
+    {
+        try {
+            $this->doctrine->getConnection()->executeQuery('SELECT 1 FROM usage_record WHERE 1 = 0');
+
+            return true;
+        } catch (\Throwable) {
+            return false;
+        }
+    }
+
     public function replay(string $day): int
     {
         $stored = 0;
         foreach ($this->spool->read($day) as $records) {
             $stored += $this->store($records);
+        }
+        // Lines no replay can read are kept as they are, and told about (Įspėjimai).
+        $broken = (array) ($this->settings->get(Settings::USAGE_BROKEN_LINES) ?? []);
+        if (0 !== $this->spool->brokenLines($day) || isset($broken[$day])) {
+            $broken[$day] = $this->spool->brokenLines($day);
+            $this->settings->set(Settings::USAGE_BROKEN_LINES, array_filter($broken));
         }
 
         return $stored;
@@ -131,7 +154,8 @@ class Collector
 
     public function quotasDue(): bool
     {
-        if (true === $this->settings->get(Settings::QUOTA_REFRESH_REQUESTED)) {
+        // A round under way (it did not fit one pass) or asked for: go on.
+        if (true === $this->settings->get(Settings::QUOTA_REFRESH_REQUESTED) || null !== $this->settings->instant(Settings::QUOTA_ROUND_STARTED_AT)) {
             return true;
         }
         $last = $this->settings->instant(Settings::QUOTA_REFRESHED_AT);
@@ -154,7 +178,13 @@ class Collector
         $latest = $this->snapshots->latest();
         $attempted = (array) ($this->settings->get(Settings::QUOTA_ATTEMPTED_AT) ?? []);
         $errors = (array) ($this->settings->get(Settings::QUOTA_ERRORS) ?? []);
-        usort($accounts, static fn ($a, $b) => ($attempted[$a->authIndex] ?? '') <=> ($attempted[$b->authIndex] ?? ''));
+        // A round: every account once, over as many passes as it takes.
+        $roundStart = $this->settings->instant(Settings::QUOTA_ROUND_STARTED_AT);
+        if (null === $roundStart) {
+            $roundStart = $this->clock->now();
+            $this->settings->markNow(Settings::QUOTA_ROUND_STARTED_AT, $roundStart);
+        }
+        usort($accounts, static fn ($a, $b) => (int) ($attempted[$a->authIndex] ?? 0) <=> (int) ($attempted[$b->authIndex] ?? 0));
         // Each provider request may take 10 s; the whole read stays well inside the collector's minute.
         $deadline = microtime(true) + 40;
         $read = 0;
@@ -163,7 +193,7 @@ class Collector
                 break;
             }
             $snapshot = $this->quotaFetcher->fetch($account, $userAgents[$account->provider] ?? null);
-            $attempted[$account->authIndex] = $this->clock->now()->format(\DATE_ATOM);
+            $attempted[$account->authIndex] = $this->clock->now()->getTimestamp();
             ++$read;
             if (null !== $snapshot->error) {
                 $errors[$account->authIndex] = $this->clock->now()->format('Y-m-d H:i').': '.$snapshot->error;
@@ -172,8 +202,8 @@ class Collector
             }
             $previous = $latest[$account->authIndex] ?? null;
             if ('headers' === $snapshot->source) {
-                // A fallback from headers no newer than what is known adds nothing.
-                if (null !== $previous && $snapshot->fetchedAt <= $previous->fetchedAt) {
+                // A fallback with no headers, or none newer than what is known, measured nothing: only its error stays.
+                if ([] === $snapshot->windows() || (null !== $previous && $snapshot->fetchedAt <= $previous->fetchedAt)) {
                     continue;
                 }
                 $snapshot = $snapshot->withMissingFrom($previous);
@@ -183,9 +213,11 @@ class Collector
         $entityManager->flush();
         $this->settings->set(Settings::QUOTA_ATTEMPTED_AT, $attempted);
         $this->settings->set(Settings::QUOTA_ERRORS, $errors);
-        if ($read === \count($accounts)) {
+        $done = [] === array_filter($accounts, static fn ($account) => (int) ($attempted[$account->authIndex] ?? 0) < $roundStart->getTimestamp());
+        if ($done) {
             $this->settings->markNow(Settings::QUOTA_REFRESHED_AT, $this->clock->now());
             $this->settings->set(Settings::QUOTA_REFRESH_REQUESTED, false);
+            $this->settings->set(Settings::QUOTA_ROUND_STARTED_AT, null);
         }
         if ($this->settings->autoPriority()) {
             $this->prioritizer->apply($this->client->accounts(), $this->snapshots->latest(), $this->clock->now());
@@ -295,32 +327,35 @@ class Collector
     }
 
     /**
-     * Attempts of one request in time order (a failed one first when two share a second): an attempt after a failed one
-     * within ten minutes is a retry, and the failed one is superseded – in this batch or already in the database. A
-     * Codex WebSocket connection shares one request id across its turns; a turn after a successful one is no retry.
+     * Attempts of one request in the order they happened (to the microsecond; stored ones first on a tie, then the queue's
+     * order): an attempt within two minutes after a failed one is its retry (CLIProxyAPI retries within
+     * max-retry-interval), and the failed one is superseded – in this batch or already in the database. A Codex
+     * WebSocket connection shares one request id across its turns; a turn after a successful one is no retry, and the
+     * rare new turn within two minutes after a failed one is counted as its retry.
      *
      * @param array<string, UsageRecord> $rows
      */
     private function markRetries(array $rows): void
     {
         $byRequest = [];
+        $order = 0;
         foreach ($rows as $row) {
             if ('' !== $row->requestId) {
-                $byRequest[$row->requestId][] = ['at' => $row->occurredAt->getTimestamp(), 'failed' => $row->failed, 'row' => $row, 'id' => null];
+                $byRequest[$row->requestId][] = ['at' => $row->occurredAt->getTimestamp() + $row->occurredMicros / 1e6, 'failed' => $row->failed, 'row' => $row, 'id' => null, 'order' => \PHP_INT_MAX / 2 + ++$order];
             }
         }
         if ([] === $byRequest) {
             return;
         }
         foreach ($this->usage->attemptsOf(array_keys($byRequest)) as $attempt) {
-            $byRequest[$attempt['request_id']][] = ['at' => $attempt['at'], 'failed' => $attempt['failed'], 'row' => null, 'id' => $attempt['id']];
+            $byRequest[$attempt['request_id']][] = ['at' => $attempt['at'], 'failed' => $attempt['failed'], 'row' => null, 'id' => $attempt['id'], 'order' => $attempt['id']];
         }
         $supersede = [];
         foreach ($byRequest as $attempts) {
-            usort($attempts, static fn (array $a, array $b) => [$a['at'], !$a['failed']] <=> [$b['at'], !$b['failed']]);
+            usort($attempts, static fn (array $a, array $b) => [$a['at'], $a['order']] <=> [$b['at'], $b['order']]);
             $previous = null;
             foreach ($attempts as $attempt) {
-                if (null !== $previous && $previous['failed'] && $attempt['at'] - $previous['at'] <= 600) {
+                if (null !== $previous && $previous['failed'] && $attempt['at'] - $previous['at'] <= 120) {
                     if (null !== $attempt['row']) {
                         $attempt['row']->isRetry = true;
                     }
