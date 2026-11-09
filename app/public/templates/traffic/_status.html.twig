@@ -1,6 +1,10 @@
 {# The outcome of one exchange as a tag. #}
 {% if exchange.failed %}
     <span class="tag tag-bad" title="{{ exchange.error }}">HTTP {{ exchange.statusCode ?: '–' }}</span>
+{% elseif exchange.promptKind in ['user', 'agent'] %}
+    {# A prompt starts the work; what the model did with it is in the tools column and the next rows. #}
+    <span class="tag tag-prompt" title="Nauja užklausa ({{ exchange.promptKind == 'user' ? 'žmogaus' : 'agento' }}); modelis {{ exchange.stopReason in ['tool_use'] or exchange.toolCallCount > 0 ? 'atsakė įrankio kvietimu' : 'iškart atsakė' }}">užklausa</span>
+    {% if not (exchange.stopReason in ['tool_use'] or exchange.toolCallCount > 0) and exchange.stopReason in ['end_turn', 'completed', 'stop_sequence'] %}<span class="tag tag-ok">atsakė</span>{% endif %}
 {% elseif exchange.stopReason in ['tool_use'] or exchange.toolCallCount > 0 %}
     <span class="tag tag-info" title="Modelis atsakė įrankio kvietimu ({{ exchange.stopReason ?: 'tool_use' }}); darbas tęsiasi kitoje užklausoje">kviečia įrankį</span>
 {% elseif exchange.stopReason in ['max_tokens', 'incomplete: max_output_tokens'] %}

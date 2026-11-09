@@ -92,6 +92,13 @@ if (live) {
                 model.textContent = record.model;
                 const modelCell = cell('');
                 modelCell.append(model);
+                if (record.effort) {
+                    const effort = document.createElement('span');
+                    effort.className = 'kind kind-effort';
+                    effort.title = 'Reasoning effort';
+                    effort.textContent = record.effort;
+                    modelCell.append(' ', effort);
+                }
                 row.append(
                     cell(new Date(record.at).toLocaleTimeString('lt-LT')),
                     accountCell(record.account),

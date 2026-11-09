@@ -249,7 +249,8 @@ class Collector
     /** @return int the request logs taken in */
     public function collectTraffic(): int
     {
-        return $this->traffic->ingest();
+        // Closed connections' files first: they supersede the live turns read before.
+        return $this->traffic->ingest() + $this->traffic->collectLiveTurns();
     }
 
     public function linkTraffic(): void

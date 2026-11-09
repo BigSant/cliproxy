@@ -59,7 +59,7 @@ class DashboardTest extends WebTestCase
             'iguana_necktie' => ['utilization' => 7, 'resets_at' => '2030-01-03T00:00:00Z'],
         ])];
         $this->cliProxy->queue = [['timestamp' => (new \DateTimeImmutable())->format(\DATE_ATOM), 'provider' => 'claude', 'model' => 'claude-fable-5-1',
-            'auth_index' => 'idx-me@example.com', 'source' => 'me@example.com', 'session_id' => 's1',
+            'auth_index' => 'idx-me@example.com', 'source' => 'me@example.com', 'session_id' => 's1', 'reasoning_effort' => 'xhigh',
             'tokens' => ['input_tokens' => 100, 'output_tokens' => 50, 'cache_read_tokens' => 9000, 'cache_creation_tokens' => 1000, 'total_tokens' => 10150]]];
         $collector = self::getContainer()->get(Collector::class);
         $collector->collectUsage();
@@ -76,7 +76,8 @@ class DashboardTest extends WebTestCase
         self::assertSelectorTextContains('table.live', 'claude-fable-5-1');
 
         $this->browser->request('GET', '/live');
-        self::assertSame('me@example.com', json_decode((string) $this->browser->getResponse()->getContent(), true)[0]['account']);
+        $live = json_decode((string) $this->browser->getResponse()->getContent(), true)[0];
+        self::assertSame(['me@example.com', 'xhigh'], [$live['account'], $live['effort']], 'the refreshed list keeps the effort');
         foreach (['/accounts', '/usage?range=24h', '/settings', '/connect'] as $page) {
             $this->browser->request('GET', $page);
             self::assertResponseIsSuccessful($page);

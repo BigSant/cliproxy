@@ -57,6 +57,7 @@ class DashboardController extends AbstractController
             'at' => $record->occurredAt->format(\DATE_ATOM),
             'provider' => $record->provider,
             'model' => $record->model,
+            'effort' => $record->reasoningEffort,
             'account' => $record->account,
             'input' => $record->inputTokens,
             'output' => $record->outputTokens,

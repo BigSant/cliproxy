@@ -224,6 +224,7 @@ h1 .provider { font-size: 1.5rem; font-weight: 650; }
 .tag-warn { background: color-mix(in srgb, var(--warn) 18%, transparent); color: var(--warn); }
 .tag-bad { background: color-mix(in srgb, var(--bad) 16%, transparent); color: var(--bad); }
 .tag-info { background: color-mix(in srgb, var(--info) 16%, transparent); color: var(--info); }
+.tag-prompt { background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--accent); }
 
 .quota { min-width: 120px; }
 .quota-line { display: flex; justify-content: space-between; gap: .5rem; font-size: .85rem; }

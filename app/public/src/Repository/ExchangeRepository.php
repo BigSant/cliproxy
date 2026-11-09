@@ -30,7 +30,7 @@ class ExchangeRepository extends ServiceEntityRepository
     public function search(array $filters, \DateTimeImmutable $since, int $limit, int $offset = 0): array
     {
         return $this->filtered($filters, $since)
-            ->select('e.id, e.occurredAt, e.provider, e.model, e.reasoningEffort, e.endpoint, e.account, e.kind, e.promptKind, e.hasThinking',
+            ->select('e.id, e.occurredAt, e.provider, e.model, e.reasoningEffort, e.logFile, e.endpoint, e.account, e.kind, e.promptKind, e.hasThinking',
                 'e.toolCallCount, e.toolErrorCount, e.inputTokens, e.outputTokens, e.cacheReadTokens, e.cacheCreationTokens',
                 'e.durationMs, e.failed, e.statusCode, e.stopReason',
                 'SUBSTRING(e.prompt, 1, '.self::EXCERPT.') AS prompt, SUBSTRING(e.answer, 1, '.self::EXCERPT.') AS answer',
