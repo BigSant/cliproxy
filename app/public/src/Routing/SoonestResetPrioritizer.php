@@ -25,9 +25,9 @@ class SoonestResetPrioritizer
      *
      * @return array<string, int> the priority each account has now, by account name
      */
-    public function apply(array $accounts, array $snapshots): array
+    public function apply(array $accounts, array $snapshots, ?\DateTimeImmutable $now = null): array
     {
-        $priorities = self::priorities($accounts, $snapshots);
+        $priorities = self::priorities($accounts, $snapshots, $now ?? new \DateTimeImmutable());
         foreach ($accounts as $account) {
             $priority = $priorities[$account->name] ?? null;
             if (null !== $priority && $priority !== $account->priority) {
@@ -39,15 +39,17 @@ class SoonestResetPrioritizer
     }
 
     /**
-     * Per provider: exhausted accounts get 0, the rest 1… in reverse order of their weekly reset (sooner = higher).
-     * An account without a known reset ranks after those with one.
+     * Per provider, three bands: accounts with room first, ordered by when their week resets (sooner = higher); then
+     * accounts whose 5-hour window is nearly used up (90 %+), so a new session does not start where it would soon hit
+     * the limit; last, with 0, accounts that are used up or that CLIProxyAPI holds back. A window whose reset has passed
+     * counts as fresh. An account without a known reset ranks after those with one in its band.
      *
      * @param list<Account>                $accounts
      * @param array<string, QuotaSnapshot> $snapshots
      *
      * @return array<string, int>
      */
-    public static function priorities(array $accounts, array $snapshots): array
+    public static function priorities(array $accounts, array $snapshots, \DateTimeImmutable $now): array
     {
         $byProvider = [];
         foreach ($accounts as $account) {
@@ -57,31 +59,34 @@ class SoonestResetPrioritizer
         }
         $priorities = [];
         foreach ($byProvider as $providerAccounts) {
-            $usable = [];
+            $fresh = $hot = [];
             foreach ($providerAccounts as $account) {
                 $snapshot = $snapshots[$account->authIndex] ?? null;
-                $exhausted = false;
-                foreach ($snapshot?->windows() ?? [] as $window) {
-                    if (\in_array($window->key, [QuotaWindow::FIVE_HOUR, QuotaWindow::WEEK], true) && $window->isExhausted()) {
-                        $exhausted = true;
-                    }
-                }
-                if ($exhausted) {
+                $fiveHour = $snapshot?->window(QuotaWindow::FIVE_HOUR);
+                $week = $snapshot?->window(QuotaWindow::WEEK);
+                if ($account->quotaBlocked || $fiveHour?->isExhausted($now) || $week?->isExhausted($now)) {
                     $priorities[$account->name] = 0;
+                    continue;
+                }
+                $reset = null !== $week?->resetsAt && $week->resetsAt > $now ? $week->resetsAt : null;
+                if (null !== $fiveHour && $fiveHour->usedAt($now) >= 90) {
+                    $hot[] = [$account, $reset];
                 } else {
-                    $usable[] = [$account, $snapshot?->window(QuotaWindow::WEEK)?->resetsAt];
+                    $fresh[] = [$account, $reset];
                 }
             }
-            usort($usable, static function (array $a, array $b): int {
-                if (null === $a[1] || null === $b[1]) {
-                    return (null === $a[1]) <=> (null === $b[1]) ?: strcmp($a[0]->name, $b[0]->name);
-                }
+            $priority = \count($fresh) + \count($hot);
+            foreach ([$fresh, $hot] as $band) {
+                usort($band, static function (array $a, array $b): int {
+                    if (null === $a[1] || null === $b[1]) {
+                        return (null === $a[1]) <=> (null === $b[1]) ?: strcmp($a[0]->name, $b[0]->name);
+                    }
 
-                return $a[1] <=> $b[1] ?: strcmp($a[0]->name, $b[0]->name);
-            });
-            $priority = \count($usable);
-            foreach ($usable as [$account]) {
-                $priorities[$account->name] = $priority--;
+                    return $a[1] <=> $b[1] ?: strcmp($a[0]->name, $b[0]->name);
+                });
+                foreach ($band as [$account]) {
+                    $priorities[$account->name] = $priority--;
+                }
             }
         }
 

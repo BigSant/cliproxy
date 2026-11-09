@@ -3,6 +3,10 @@
   "dialect": "mysql",
   "tables": [
     {
+      "name": "alert",
+      "file": "table-alert.sql"
+    },
+    {
       "name": "doctrine_migration_versions",
       "file": "table-doctrine_migration_versions.sql"
     },

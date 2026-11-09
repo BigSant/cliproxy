@@ -33,9 +33,12 @@ CREATE TABLE `exchange` (
   `request_bytes` int NOT NULL,
   `response_bytes` int NOT NULL,
   `archive_path` varchar(255) NOT NULL,
+  `kind` varchar(16) NOT NULL DEFAULT 'main',
+  `has_thinking` tinyint NOT NULL DEFAULT '0',
   PRIMARY KEY (`id`),
   UNIQUE KEY `UNIQ_D33BB0799DF1D865` (`log_file`),
   KEY `exchange_occurred` (`occurred_at`),
   KEY `exchange_session` (`session_id`,`occurred_at`),
-  KEY `exchange_request` (`request_tail`)
+  KEY `exchange_request` (`request_tail`),
+  FULLTEXT KEY `exchange_fulltext` (`prompt`,`answer`,`thinking`,`error`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;

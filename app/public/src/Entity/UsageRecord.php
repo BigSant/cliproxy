@@ -7,20 +7,46 @@ use Doctrine\DBAL\Types\Types;
 use Doctrine\ORM\Mapping as ORM;
 
 /**
- * One request the hub proxied, as CLIProxyAPI's usage queue reported it. CLIProxyAPI keeps no history of its own, so
- * these rows are the hub's only memory of tokens, cache reads and writes, and which account served which session.
+ * One upstream attempt of a request the hub proxied, as CLIProxyAPI's usage queue reported it (a retry or a switch to
+ * another account is another record with the same request id). CLIProxyAPI keeps no history of its own, so these rows
+ * are the hub's only memory of tokens, cache reads and writes, and which account served which session. The whole
+ * record is kept in $raw: fields the hub does not read today stay available, and the queue gives each record once.
  */
 #[ORM\Entity(repositoryClass: UsageRecordRepository::class)]
 #[ORM\Index(name: 'usage_occurred', columns: ['occurred_at'])]
 #[ORM\Index(name: 'usage_account', columns: ['auth_index', 'occurred_at'])]
 #[ORM\Index(name: 'usage_session', columns: ['session_id'])]
 #[ORM\Index(name: 'usage_request', columns: ['request_tail'])]
+#[ORM\UniqueConstraint(name: 'usage_record_key', columns: ['record_key'])]
 class UsageRecord
 {
     #[ORM\Id]
     #[ORM\GeneratedValue]
     #[ORM\Column(type: Types::BIGINT)]
     private ?string $id = null;
+
+    /** sha1 of the record as CLIProxyAPI sent it: the same record imported twice (spool replay) is one row. */
+    #[ORM\Column(length: 40, nullable: true)]
+    public ?string $recordKey = null;
+    #[ORM\Column(length: 64, options: ['default' => ''])]
+    public string $requestId = '';
+    #[ORM\Column(options: ['default' => 0])]
+    public int $ttftMs = 0;
+    #[ORM\Column(length: 190, options: ['default' => ''])]
+    public string $userAgent = '';
+    #[ORM\Column(length: 32, options: ['default' => ''])]
+    public string $reasoningEffort = '';
+    /** Set on a subagent's requests: the session that started it. */
+    #[ORM\Column(length: 64, options: ['default' => ''])]
+    public string $parentSessionId = '';
+    /** CLIProxyAPI's request kind: '' (a session's own turn), fork, compaction. */
+    #[ORM\Column(length: 32, options: ['default' => ''])]
+    public string $nodeKind = '';
+    #[ORM\Column(options: ['default' => false])]
+    public bool $isCompaction = false;
+    /** @var array<string, mixed> */
+    #[ORM\Column(type: Types::JSON, nullable: true)]
+    public ?array $raw = null;
 
     public function __construct(
         #[ORM\Column(type: 'utc_datetime_immutable')]
@@ -87,13 +113,13 @@ class UsageRecord
         $tokens = \is_array($record['tokens'] ?? null) ? $record['tokens'] : [];
         $fail = \is_array($record['fail'] ?? null) ? $record['fail'] : [];
         try {
-            $occurredAt = new \DateTimeImmutable((string) ($record['timestamp'] ?? 'now'));
+            $occurredAt = new \DateTimeImmutable(\is_string($record['timestamp'] ?? null) ? $record['timestamp'] : 'now');
         } catch (\Exception) {
             $occurredAt = new \DateTimeImmutable();
         }
         $provider = (string) ($record['provider'] ?? '');
 
-        return new self(
+        $usage = new self(
             occurredAt: $occurredAt,
             provider: substr('anthropic' === $provider ? 'claude' : $provider, 0, 32),
             model: substr((string) ($record['model'] ?? ''), 0, 128),
@@ -115,5 +141,40 @@ class UsageRecord
             cacheCreation5mTokens: (int) ($tokens['cache_creation_5m_tokens'] ?? 0),
             cacheCreation1hTokens: (int) ($tokens['cache_creation_1h_tokens'] ?? 0),
         );
+        $usage->recordKey = self::keyOf($record);
+        $usage->requestId = substr(trim((string) ($record['request_id'] ?? '')), 0, 64);
+        $usage->ttftMs = (int) ($record['ttft_ms'] ?? 0);
+        $usage->userAgent = mb_substr((string) ($record['user_agent'] ?? ''), 0, 190);
+        $usage->reasoningEffort = substr((string) ($record['reasoning_effort'] ?? ''), 0, 32);
+        $usage->parentSessionId = substr((string) ($record['parent_session_id'] ?? ''), 0, 64);
+        $usage->nodeKind = substr((string) ($record['node_kind'] ?? ''), 0, 32);
+        $usage->isCompaction = (bool) ($record['is_compaction'] ?? false);
+        $usage->raw = $record;
+
+        return $usage;
+    }
+
+    /** @param array<string, mixed> $record */
+    public static function keyOf(array $record): string
+    {
+        return sha1(json_encode($record, \JSON_UNESCAPED_UNICODE | \JSON_UNESCAPED_SLASHES | \JSON_INVALID_UTF8_SUBSTITUTE) ?: '');
+    }
+
+    /**
+     * The provider's rate-limit headers of this attempt's answer (lower-case names), when CLIProxyAPI passed them on.
+     *
+     * @return array<string, string>
+     */
+    public function rateLimitHeaders(): array
+    {
+        $headers = [];
+        foreach ((array) ($this->raw['response_headers'] ?? []) as $name => $value) {
+            $name = strtolower((string) $name);
+            if (str_starts_with($name, 'anthropic-ratelimit-') || str_starts_with($name, 'x-codex-')) {
+                $headers[$name] = \is_array($value) ? (string) ($value[0] ?? '') : (string) $value;
+            }
+        }
+
+        return $headers;
     }
 }

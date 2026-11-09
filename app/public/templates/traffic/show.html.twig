@@ -84,6 +84,7 @@
         <h2>Užklausos duomenys</h2>
         <dl class="facts">
             <dt>Sesija</dt><dd>{% if exchange.sessionId %}<a href="{{ path('app_traffic_session', {sessionId: exchange.sessionId}) }}"><code>{{ exchange.sessionId }}</code></a>{% else %}–{% endif %}</dd>
+            <dt>Tipas</dt><dd>{{ {main: 'pagrindinė', subagent: 'subagentas', compaction: 'compaction', fork: 'fork', side: 'šalutinė (kliento patikra ar santrauka)'}[exchange.kind] ?? exchange.kind }}</dd>
             <dt>Pabaiga</dt><dd>{{ exchange.stopReason ?: '–' }}</dd>
             <dt>Sistema / įrankiai</dt><dd>{{ exchange.systemChars|tokens }} simb. sistemos instrukcijų · {{ exchange.toolsDeclared }} deklaruoti įrankiai</dd>
             <dt>Dydis</dt><dd>užklausa {{ exchange.requestBytes|tokens }} B · atsakymas {{ exchange.responseBytes|tokens }} B</dd>

@@ -24,9 +24,21 @@ class FakeCliProxy
     public string $loginStatus = 'ok';
     /** CLIProxyAPI not running: every request fails to connect. */
     public bool $down = false;
+    /** @var list<array{method: string, url: string, body: string}> */
+    public array $external = [];
+    public string $latestVersion = 'v8.0.61';
+    public bool $verified = true;
+    /** The last config.yaml saved through PUT. */
+    public ?string $savedYaml = null;
 
     public function __invoke(string $method, string $url, array $options = []): ResponseInterface
     {
+        if ('cliproxy.test' !== parse_url($url, \PHP_URL_HOST)) {
+            // Anything else the hub calls (ntfy pushes) is recorded and answered.
+            $this->external[] = ['method' => $method, 'url' => $url, 'body' => (string) ($options['body'] ?? '')];
+
+            return new MockResponse('{}');
+        }
         if ($this->down) {
             return new MockResponse('', ['error' => 'Could not resolve host: cliproxy']);
         }
@@ -49,11 +61,37 @@ class FakeCliProxy
             'GET /oauth/auth-url' => $this->json(['status' => 'ok', 'url' => 'https://claude.ai/oauth/authorize?state=s1', 'state' => 's1']),
             'POST /oauth/callback' => $this->json(['status' => 'ok']),
             'GET /oauth/status' => $this->json(['status' => $this->loginStatus] + ('ok' === $this->loginStatus ? ['auth_id' => 'claude-new.json'] : ['error' => 'Bad request'])),
-            'GET /config' => $this->json($this->config),
+            'GET /config' => new MockResponse(json_encode($this->config), ['response_headers' => ['content-type' => 'application/json', 'x-cpa-version' => 'v8.0.61']]),
             'PATCH /config' => $this->patchConfig($body),
-            'GET /config.yaml' => new MockResponse("config-version: 8\n"),
+            'GET /config.yaml' => new MockResponse($this->yaml(), ['response_headers' => ['etag' => '"'.sha1($this->yaml()).'"']]),
+            'PUT /config.yaml' => $this->putYaml($options),
+            'GET /server/latest-version' => $this->json(['latest-version' => $this->latestVersion]),
+            'POST /routing/cooldown/reset' => $this->json(['status' => 'ok']),
+            'POST /credentials/verify' => $this->json(['status' => 'ok', 'verified' => $this->verified]),
             default => new MockResponse('{"error":"not found"}', ['http_code' => 404]),
         };
+    }
+
+    private function yaml(): string
+    {
+        return $this->savedYaml ?? "config-version: 8\naccess:\n  api-keys: [\"".implode('", "', $this->config['access']['api-keys'] ?? [])."\"]\n";
+    }
+
+    /** @param array<string, mixed> $options */
+    private function putYaml(array $options): MockResponse
+    {
+        $ifMatch = null;
+        foreach ((array) ($options['headers'] ?? []) as $header) {
+            if (str_starts_with(strtolower((string) $header), 'if-match: ')) {
+                $ifMatch = substr((string) $header, 10);
+            }
+        }
+        if (null !== $ifMatch && $ifMatch !== '"'.sha1($this->yaml()).'"') {
+            return new MockResponse('{"error":"precondition_failed"}', ['http_code' => 412]);
+        }
+        $this->savedYaml = (string) $options['body'];
+
+        return $this->json(['status' => 'ok']);
     }
 
     /** @return list<array<string, mixed>> */

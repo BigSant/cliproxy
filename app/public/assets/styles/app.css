@@ -336,6 +336,14 @@ button.link:hover { color: var(--text); text-decoration: underline; }
 .swatch-total { background: color-mix(in srgb, var(--accent) 35%, var(--bar-bg)); }
 .swatch-cache { background: var(--accent); margin-left: .6rem; }
 
+.alert-row { display: flex; gap: .8rem; align-items: flex-start; padding: .7rem 0; border-bottom: 1px solid var(--border); }
+.alert-row:last-child { border-bottom: 0; }
+.alert-row.is-resolved { opacity: .65; }
+.nav-badge { margin-left: auto; min-width: 1.3rem; height: 1.3rem; padding: 0 .35rem; border-radius: 999px; background: var(--bad); color: #fff; font-size: .72rem; font-weight: 700; display: inline-grid; place-items: center; }
+.nav-badge.warn { background: var(--warn); color: #111; }
+.sidebar-foot { margin-top: auto; padding: 0 .7rem; font-size: .78rem; color: var(--muted); display: grid; gap: .2rem; }
+.sidebar-foot .update { color: var(--warn); }
+.banner { display: flex; gap: .7rem; align-items: center; }
 .note-box { margin-top: 1rem; padding: .8rem 1rem; border-radius: 10px; border: 1px solid color-mix(in srgb, var(--warn) 45%, var(--border)); background: color-mix(in srgb, var(--warn) 8%, var(--surface)); font-size: .9rem; line-height: 1.55; }
 .note-box .muted { display: block; margin-top: .3rem; font-size: .85em; }
 pre.code { background: var(--surface-2); padding: 1rem; border-radius: 10px; overflow-x: auto; margin: 0 0 .75rem; }

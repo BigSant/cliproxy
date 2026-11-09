@@ -2,14 +2,56 @@
 
 namespace App\Twig;
 
+use App\Entity\Alert;
+use App\Repository\AlertRepository;
+use App\Settings\Settings;
 use Psr\Clock\ClockInterface;
 use Twig\Attribute\AsTwigFilter;
+use Twig\Attribute\AsTwigFunction;
 
 /** Number and time formats of the dashboard (Lithuanian). */
 class AppExtension
 {
-    public function __construct(private readonly ClockInterface $clock)
+    /** @var array<string, mixed>|null */
+    private ?array $status = null;
+
+    public function __construct(
+        private readonly ClockInterface $clock,
+        private readonly AlertRepository $alerts,
+        private readonly Settings $settings,
+    ) {
+    }
+
+    /**
+     * What every page shows around its content: open alerts, CLIProxyAPI's version and whether the collector runs.
+     *
+     * @return array{errors: int, warnings: int, version: ?string, latest: ?string, collectorStale: bool, collectorSeen: ?\DateTimeImmutable, collectorError: ?string}
+     */
+    #[AsTwigFunction('hub_status')]
+    public function hubStatus(): array
     {
+        if (null !== $this->status) {
+            return $this->status;
+        }
+        $errors = $warnings = 0;
+        foreach ($this->alerts->open() as $alert) {
+            Alert::ERROR === $alert->level ? ++$errors : (Alert::WARNING === $alert->level ? ++$warnings : null);
+        }
+        $heartbeat = $this->settings->instant(Settings::COLLECTOR_HEARTBEAT);
+        $version = $this->settings->get(Settings::CLIPROXY_VERSION);
+        $latest = $this->settings->get(Settings::CLIPROXY_LATEST);
+        $error = $this->settings->get(Settings::COLLECTOR_ERROR);
+
+        return $this->status = [
+            'errors' => $errors,
+            'warnings' => $warnings,
+            'version' => \is_string($version) ? $version : null,
+            'latest' => \is_string($latest) && \is_string($version) && version_compare(ltrim($latest, 'v'), ltrim($version, 'v'), '>') ? $latest : null,
+            // cron starts a pass every minute; three minutes without one means it stopped.
+            'collectorStale' => null === $heartbeat || $this->clock->now()->getTimestamp() - $heartbeat->getTimestamp() > 180,
+            'collectorSeen' => $heartbeat,
+            'collectorError' => \is_string($error) && '' !== $error ? $error : null,
+        ];
     }
 
     /** 1234567 → 1,2 M */

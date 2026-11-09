@@ -45,7 +45,7 @@ class QuotaSnapshotRepository extends ServiceEntityRepository
      *
      * @return array<string, list<QuotaSnapshot>>
      */
-    public function history(array $authIndexes, \DateTimeImmutable $since): array
+    public function history(array $authIndexes, \DateTimeImmutable $since, ?\DateTimeImmutable $until = null): array
     {
         if ([] === $authIndexes) {
             return [];
@@ -56,6 +56,8 @@ class QuotaSnapshotRepository extends ServiceEntityRepository
             ->andWhere('s.fetchedAt >= :since')
             ->setParameter('accounts', $authIndexes)
             ->setParameter('since', $since->modify('-1 day'), 'utc_datetime_immutable')
+            ->andWhere('s.fetchedAt <= :until')
+            ->setParameter('until', $until ?? new \DateTimeImmutable('+1 day'), 'utc_datetime_immutable')
             ->orderBy('s.fetchedAt', 'ASC')
             ->addOrderBy('s.id', 'ASC')
             ->getQuery()

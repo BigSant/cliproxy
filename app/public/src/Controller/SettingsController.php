@@ -36,9 +36,11 @@ class SettingsController extends AbstractController
         $error = null;
         $config = [];
         $yaml = '';
+        $etag = null;
         try {
             $config = $this->client->config();
-            $yaml = $this->client->configYaml();
+            ['yaml' => $yaml, 'etag' => $etag] = $this->client->configYaml();
+            $yaml = self::maskKeys($yaml, array_values(array_map('strval', $config['access']['api-keys'] ?? [])));
         } catch (ManagementException $exception) {
             $error = $exception->getMessage();
         }
@@ -57,6 +59,8 @@ class SettingsController extends AbstractController
             'autoPriority' => $this->settings->autoPriority(),
             'refreshMinutes' => $this->settings->quotaRefreshMinutes(),
             'yaml' => $yaml,
+            'etag' => $etag,
+            'ntfyUrl' => (string) ($this->settings->get(Settings::NTFY_URL) ?? ''),
         ]);
     }
 
@@ -140,8 +144,51 @@ class SettingsController extends AbstractController
     {
         $this->checkToken($request);
         $yaml = str_replace("\r\n", "\n", (string) $request->request->get('yaml'));
+        $etag = (string) $request->request->get('etag') ?: null;
 
-        return $this->attempt(fn () => $this->client->putConfigYaml($yaml), 'config.yaml išsaugotas.');
+        return $this->attempt(function () use ($yaml, $etag) {
+            $keys = $this->client->apiKeys();
+            $this->client->putConfigYaml(self::unmaskKeys($yaml, $keys), $etag);
+        }, 'config.yaml išsaugotas.');
+    }
+
+    #[Route('/ntfy', name: 'app_settings_ntfy', methods: ['POST'])]
+    public function ntfy(Request $request): RedirectResponse
+    {
+        $this->checkToken($request);
+        $url = trim((string) $request->request->get('ntfy_url'));
+        if ('' !== $url && !preg_match('#^https?://[^\s/]+/[A-Za-z0-9_-]{1,64}$#', $url)) {
+            $this->addFlash('error', 'ntfy adresas turi būti toks: https://ntfy.sh/<tema>.');
+
+            return $this->redirectToRoute('app_settings');
+        }
+        $this->settings->set(Settings::NTFY_URL, $url);
+        $this->addFlash('success', '' === $url ? 'Pranešimai į telefoną išjungti.' : 'Įspėjimai bus siunčiami į '.$url.'.');
+
+        return $this->redirectToRoute('app_settings');
+    }
+
+    /**
+     * The client keys in config.yaml show as placeholders; a save puts the real ones back. A key typed in by hand stays
+     * as typed.
+     *
+     * @param list<string> $keys
+     */
+    public static function maskKeys(string $yaml, array $keys): string
+    {
+        foreach ($keys as $index => $key) {
+            if ('' !== $key) {
+                $yaml = str_replace($key, '<raktas-'.($index + 1).'>', $yaml);
+            }
+        }
+
+        return $yaml;
+    }
+
+    /** @param list<string> $keys */
+    public static function unmaskKeys(string $yaml, array $keys): string
+    {
+        return preg_replace_callback('/<raktas-(\d+)>/', static fn (array $match) => $keys[(int) $match[1] - 1] ?? $match[0], $yaml) ?? $yaml;
     }
 
     private function checkToken(Request $request): void

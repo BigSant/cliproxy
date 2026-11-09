@@ -5,7 +5,7 @@ namespace App\Controller;
 use App\CliProxy\ManagementClient;
 use App\CliProxy\ManagementException;
 use App\Repository\QuotaSnapshotRepository;
-use App\Usage\Collector;
+use App\Settings\Settings;
 use App\View\AccountRows;
 use Psr\Clock\ClockInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
@@ -65,6 +65,36 @@ class AccountController extends AbstractController
             $login = $this->client->startLogin($provider);
             $request->getSession()->set(self::LOGIN, ['provider' => $provider] + $login);
         });
+    }
+
+    /**
+     * Signs an existing account in again in place: the same file keeps its priority, note and history (CLIProxyAPI's
+     * targeted login), instead of removing the account and adding it anew.
+     */
+    #[Route('/relogin', name: 'app_accounts_relogin', methods: ['POST'])]
+    public function relogin(Request $request): RedirectResponse
+    {
+        $this->checkToken($request);
+        $name = $this->name($request);
+        $provider = (string) $request->request->get('provider');
+        if (!isset(self::PROVIDERS[$provider])) {
+            throw $this->createNotFoundException();
+        }
+
+        return $this->attempt(function () use ($request, $provider, $name) {
+            $login = $this->client->startRelogin($provider, $name);
+            $request->getSession()->set(self::LOGIN, ['provider' => $provider, 'relogin' => $name] + $login);
+        });
+    }
+
+    /** Ends CLIProxyAPI's own pause of an account after 429s (the provider's limit stays what it is). */
+    #[Route('/cooldown', name: 'app_accounts_cooldown', methods: ['POST'])]
+    public function resetCooldown(Request $request): RedirectResponse
+    {
+        $this->checkToken($request);
+        $authIndex = (string) $request->request->get('auth_index');
+
+        return $this->attempt(fn () => $this->client->resetCooldown($authIndex), 'Pauzė atšaukta.');
     }
 
     /** The pasted callback address goes to CLIProxyAPI, which exchanges the code and saves the account. */
@@ -170,7 +200,8 @@ class AccountController extends AbstractController
 
         return $this->attempt(function () use ($name) {
             $result = $this->client->verify($name);
-            $ok = ($result['ok'] ?? $result['success'] ?? ('ok' === ($result['status'] ?? null))) === true;
+            // CLIProxyAPI answers {status, verified, …}: "verified" says whether the 1-token test worked.
+            $ok = true === ($result['verified'] ?? $result['ok'] ?? $result['success'] ?? null);
             $this->addFlash($ok ? 'success' : 'error', $ok ? 'Paskyra atsako.' : 'Paskyra neatsako: '.json_encode($result, \JSON_UNESCAPED_UNICODE));
         }, flash: false);
     }
@@ -184,18 +215,19 @@ class AccountController extends AbstractController
         return $this->attempt(fn () => $this->client->delete($name), 'Paskyra pašalinta iš hub\'o.');
     }
 
+    /** The collector reads the limits on its next pass (seconds): a web request never waits on every provider. */
     #[Route('/quotas', name: 'app_accounts_quotas', methods: ['POST'])]
-    public function refreshQuotas(Request $request, Collector $collector): RedirectResponse
+    public function refreshQuotas(Request $request, Settings $settings): RedirectResponse
     {
         $this->checkToken($request);
+        $settings->set(Settings::QUOTA_REFRESH_REQUESTED, true);
+        $this->addFlash('success', 'Limitai bus perskaityti per kelias sekundes – atnaujink puslapį.');
 
-        $back = match ((string) $request->request->get('back')) {
+        return $this->redirectToRoute(match ((string) $request->request->get('back')) {
             'dashboard' => 'app_dashboard',
             'quota' => 'app_quota',
             default => 'app_accounts',
-        };
-
-        return $this->attempt(fn () => $collector->refreshQuotas(), 'Limitai perskaityti.', $back);
+        });
     }
 
     private function name(Request $request): string

@@ -11,6 +11,9 @@ use Doctrine\Persistence\ManagerRegistry;
 class ExchangeRepository extends ServiceEntityRepository
 {
     public const array OUTCOMES = ['failed', 'tool_error', 'thinking', 'prompt'];
+    public const array KINDS = ['main', 'subagent', 'compaction', 'fork', 'side'];
+    /** The list shows the start of each text; the full text is on the exchange's own page. */
+    private const int EXCERPT = 400;
 
     public function __construct(ManagerRegistry $registry)
     {
@@ -18,19 +21,52 @@ class ExchangeRepository extends ServiceEntityRepository
     }
 
     /**
-     * The Žurnalas list: newest first, filtered.
+     * The Žurnalas list, newest first: the columns it shows and the start of each text, never the long texts whole.
      *
-     * @param array{provider?: string, model?: string, account?: string, session?: string, outcome?: string, q?: string} $filters
+     * @param array<string, string> $filters
      *
-     * @return list<Exchange>
+     * @return list<array<string, mixed>>
      */
     public function search(array $filters, \DateTimeImmutable $since, int $limit, int $offset = 0): array
     {
         return $this->filtered($filters, $since)
+            ->select('e.id, e.occurredAt, e.provider, e.model, e.endpoint, e.account, e.kind, e.promptKind, e.hasThinking',
+                'e.toolCallCount, e.toolErrorCount, e.inputTokens, e.outputTokens, e.cacheReadTokens, e.cacheCreationTokens',
+                'e.durationMs, e.failed, e.statusCode, e.stopReason',
+                'SUBSTRING(e.prompt, 1, '.self::EXCERPT.') AS prompt, SUBSTRING(e.answer, 1, '.self::EXCERPT.') AS answer',
+                'SUBSTRING(e.error, 1, '.self::EXCERPT.') AS error')
             ->orderBy('e.occurredAt', 'DESC')
             ->addOrderBy('e.id', 'DESC')
             ->setFirstResult($offset)
             ->setMaxResults($limit)
+            ->getQuery()
+            ->getArrayResult();
+    }
+
+    /**
+     * Exports go back by id (keyset), so neither a long period nor new requests arriving meanwhile shift the pages.
+     *
+     * @param array<string, string> $filters
+     *
+     * @return list<Exchange> with their tool calls, newest first
+     */
+    public function exportBatch(array $filters, \DateTimeImmutable $since, ?int $beforeId, int $limit): array
+    {
+        $query = $this->filtered($filters, $since)->select('e.id')->orderBy('e.id', 'DESC')->setMaxResults($limit);
+        if (null !== $beforeId) {
+            $query->andWhere('e.id < :before')->setParameter('before', $beforeId);
+        }
+        $ids = array_column($query->getQuery()->getArrayResult(), 'id');
+        if ([] === $ids) {
+            return [];
+        }
+
+        return $this->createQueryBuilder('e')
+            ->addSelect('c')
+            ->leftJoin('e.toolCalls', 'c')
+            ->where('e.id IN (:ids)')
+            ->setParameter('ids', $ids)
+            ->orderBy('e.id', 'DESC')
             ->getQuery()
             ->getResult();
     }
@@ -63,7 +99,7 @@ class ExchangeRepository extends ServiceEntityRepository
         }, $this->getEntityManager()->getConnection()->createQueryBuilder()
             ->select('session_id, MIN(occurred_at) AS started, MAX(occurred_at) AS ended, MAX(account) AS account',
                 'MAX(model) AS model, MAX(provider) AS provider, COUNT(*) AS requests',
-                "SUM(CASE WHEN prompt_kind = 'user' THEN 1 ELSE 0 END) AS prompts",
+                "SUM(CASE WHEN prompt_kind = 'user' AND kind = 'main' THEN 1 ELSE 0 END) AS prompts",
                 'SUM(tool_call_count) AS tool_calls, SUM(tool_error_count) AS tool_errors',
                 'SUM(CASE WHEN failed = 1 THEN 1 ELSE 0 END) AS failed',
                 'SUM(input_tokens + output_tokens + cache_read_tokens + cache_creation_tokens) AS tokens',
@@ -87,8 +123,8 @@ class ExchangeRepository extends ServiceEntityRepository
     {
         $row = $this->getEntityManager()->getConnection()->createQueryBuilder()
             ->select('COUNT(*) AS requests, SUM(CASE WHEN failed = 1 THEN 1 ELSE 0 END) AS failed',
-                "SUM(CASE WHEN prompt_kind = 'user' THEN 1 ELSE 0 END) AS prompts",
-                "SUM(CASE WHEN thinking <> '' THEN 1 ELSE 0 END) AS with_thinking",
+                "SUM(CASE WHEN prompt_kind = 'user' AND kind = 'main' THEN 1 ELSE 0 END) AS prompts",
+                'SUM(CASE WHEN has_thinking = 1 THEN 1 ELSE 0 END) AS with_thinking',
                 'SUM(tool_call_count) AS tool_calls, SUM(tool_error_count) AS tool_errors',
                 'COUNT(DISTINCT session_id) AS sessions, SUM(duration_ms) AS duration_ms, SUM(output_tokens) AS output, SUM(reasoning_tokens) AS reasoning')
             ->from('exchange')
@@ -124,9 +160,11 @@ class ExchangeRepository extends ServiceEntityRepository
     {
         return $this->createQueryBuilder('e')
             ->where("e.authIndex = ''")
-            ->andWhere("e.requestTail <> ''")
+            ->andWhere("e.requestTail <> '' OR e.sessionId <> ''")
             ->andWhere('e.occurredAt >= :since')
             ->setParameter('since', $since, 'utc_datetime_immutable')
+            ->orderBy('e.id', 'DESC')
+            ->setMaxResults(500)
             ->getQuery()
             ->getResult();
     }
@@ -146,16 +184,44 @@ class ExchangeRepository extends ServiceEntityRepository
         match ($filters['outcome'] ?? '') {
             'failed' => $query->andWhere('e.failed = true'),
             'tool_error' => $query->andWhere('e.toolErrorCount > 0'),
-            'thinking' => $query->andWhere("e.thinking <> ''"),
-            'prompt' => $query->andWhere("e.promptKind = 'user'"),
+            'thinking' => $query->andWhere('e.hasThinking = true'),
+            'prompt' => $query->andWhere("e.promptKind = 'user'")->andWhere("e.kind = 'main'"),
             default => null,
         };
+        if (\in_array($filters['kind'] ?? '', self::KINDS, true)) {
+            $query->andWhere('e.kind = :kind')->setParameter('kind', $filters['kind']);
+        }
         if ('' !== ($filters['q'] ?? '')) {
-            $query->andWhere('e.prompt LIKE :q OR e.answer LIKE :q OR e.thinking LIKE :q OR e.error LIKE :q')
-                ->setParameter('q', '%'.addcslashes($filters['q'], '%_').'%');
+            $this->searchText($query, $filters['q']);
         }
 
         return $query;
+    }
+
+    /**
+     * Text search: MySQL's full-text index over prompt, answer, thinking and error (every word must appear); a
+     * substring scan where there is none (the SQLite tests).
+     */
+    private function searchText(QueryBuilder $query, string $text): void
+    {
+        $connection = $this->getEntityManager()->getConnection();
+        if (!$connection->getDatabasePlatform() instanceof \Doctrine\DBAL\Platforms\AbstractMySQLPlatform) {
+            $query->andWhere('e.prompt LIKE :q OR e.answer LIKE :q OR e.thinking LIKE :q OR e.error LIKE :q')
+                ->setParameter('q', '%'.addcslashes($text, '%_\\').'%');
+
+            return;
+        }
+        $words = array_filter(preg_split('/[^\p{L}\p{N}_]+/u', $text) ?: [], static fn (string $word) => mb_strlen($word) >= 2);
+        if ([] === $words) {
+            $query->andWhere('1 = 0');
+
+            return;
+        }
+        $ids = $connection->fetchFirstColumn(
+            'SELECT id FROM exchange WHERE MATCH(prompt, answer, thinking, error) AGAINST (? IN BOOLEAN MODE) ORDER BY id DESC LIMIT 5000',
+            [implode(' ', array_map(static fn (string $word) => '+'.$word.'*', $words))],
+        );
+        $query->andWhere('e.id IN (:matches)')->setParameter('matches', [] === $ids ? [0] : array_map('intval', $ids));
     }
 
     private static function utc(\DateTimeImmutable $instant): string

@@ -8,6 +8,29 @@ final class ResponsesFormat
     /** @param array<string, mixed> $request */
     public static function read(array $request, string $response, Turn $turn): void
     {
+        self::readRequest($request, $turn);
+        $answer = Turn::isEventStream($response) ? self::fromEvents(Turn::events($response)) : json_decode($response, true);
+        if (\is_array($answer)) {
+            self::readAnswer($answer, $turn);
+        }
+    }
+
+    /**
+     * One turn of a Codex WebSocket connection: its response.create and the answer's events.
+     *
+     * @param array<string, mixed>       $request
+     * @param list<array<string, mixed>> $events
+     */
+    public static function readEvents(array $request, array $events, Turn $turn): void
+    {
+        self::readRequest($request, $turn);
+        $turn->stream = true;
+        self::readAnswer(self::fromEvents($events), $turn);
+    }
+
+    /** @param array<string, mixed> $request */
+    private static function readRequest(array $request, Turn $turn): void
+    {
         $turn->model = (string) ($request['model'] ?? '');
         $turn->stream = (bool) ($request['stream'] ?? false);
         $turn->systemChars = mb_strlen((string) ($request['instructions'] ?? ''));
@@ -20,11 +43,11 @@ final class ResponsesFormat
         $input = \is_array($input) ? array_values($input) : [];
         $turn->messageCount = \count($input);
         self::readInput($input, $turn);
+    }
 
-        $answer = Turn::isEventStream($response) ? self::fromEvents(Turn::events($response)) : json_decode($response, true);
-        if (!\is_array($answer)) {
-            return;
-        }
+    /** @param array<string, mixed> $answer */
+    private static function readAnswer(array $answer, Turn $turn): void
+    {
         $answer = \is_array($answer['response'] ?? null) ? $answer['response'] : $answer;
         if (\is_array($answer['error'] ?? null)) {
             $turn->error = (string) ($answer['error']['message'] ?? json_encode($answer['error']));
@@ -94,7 +117,7 @@ final class ResponsesFormat
                 $texts[] = Turn::textOf($item['content'] ?? '');
             }
         }
-        $turn->prompt = implode("\n", array_filter($texts, 'strlen'));
+        $turn->prompt = Turn::cleanPrompt(implode("\n", array_filter($texts, 'strlen')));
         $turn->promptKind = [] !== $turn->toolResults ? Turn::PROMPT_TOOL_RESULTS : ('' !== $turn->prompt ? Turn::PROMPT_USER : Turn::PROMPT_NONE);
     }
 

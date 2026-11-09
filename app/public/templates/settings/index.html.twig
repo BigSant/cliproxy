@@ -36,6 +36,17 @@
         </section>
     </div>
 
+    <section class="card" id="ntfy">
+        <h2>Pranešimai į telefoną</h2>
+        <p class="muted"><a href="{{ path('app_alerts') }}">Įspėjimai</a> (reikia prisijungti iš naujo, nėra laisvos paskyros, CLIProxyAPI neatsako, baigiasi vieta diske)
+            siunčiami per <a href="https://ntfy.sh" target="_blank" rel="noopener noreferrer">ntfy</a>: įdiek programėlę, užsiprenumeruok sunkiai atspėjamą temą ir įrašyk jos adresą.</p>
+        <form method="post" action="{{ path('app_settings_ntfy') }}" class="inline-form">
+            <input type="hidden" name="_token" value="{{ csrf_token('settings') }}">
+            <input type="url" name="ntfy_url" value="{{ ntfyUrl }}" placeholder="https://ntfy.sh/cliproxy-hub-…">
+            <button class="button primary">Išsaugoti</button>
+        </form>
+    </section>
+
     <section class="card">
         <h2>Srauto žurnalas</h2>
         <p class="muted">Kiekviena užklausa ir atsakymas (prompt'as, mąstymas, atsakymas, įrankių kvietimai ir jų rezultatai, tokenai, būsena)
@@ -86,7 +97,9 @@
         <p class="muted">Visa CLIProxyAPI konfigūracija. Pakeitimai įsigalioja iš karto (CLIProxyAPI perkrauna failą pats).</p>
         <form method="post" action="{{ path('app_settings_yaml') }}" class="stack" data-confirm="Išsaugoti config.yaml? Klaida jame gali sustabdyti proxy.">
             <input type="hidden" name="_token" value="{{ csrf_token('settings') }}">
+            <input type="hidden" name="etag" value="{{ etag }}">
             <textarea name="yaml" rows="24" spellcheck="false" class="code">{{ yaml }}</textarea>
+            <p class="muted small">Klientų raktai rodomi kaip <code>&lt;raktas-N&gt;</code>; saugant grąžinami tikri. Jei failas pasikeitė, kol redagavai, išsaugojimas atmetamas.</p>
             <button class="button">Išsaugoti config.yaml</button>
         </form>
     </section>

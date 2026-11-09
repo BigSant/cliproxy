@@ -7,7 +7,7 @@ use App\Entity\ToolCall;
 use App\Repository\ExchangeRepository;
 use App\Repository\ToolCallRepository;
 use App\Repository\UsageRecordRepository;
-use Doctrine\ORM\EntityManagerInterface;
+use Doctrine\Persistence\ManagerRegistry;
 use Psr\Clock\ClockInterface;
 use Symfony\Component\DependencyInjection\Attribute\Autowire;
 
@@ -30,7 +30,7 @@ class TrafficIngester
         private readonly string $logDirectory,
         #[Autowire('%env(TRAFFIC_ARCHIVE_DIR)%')]
         private readonly string $archiveDirectory,
-        private readonly EntityManagerInterface $entityManager,
+        private readonly ManagerRegistry $doctrine,
         private readonly ExchangeRepository $exchanges,
         private readonly ToolCallRepository $toolCalls,
         private readonly UsageRecordRepository $usage,
@@ -38,7 +38,12 @@ class TrafficIngester
     ) {
     }
 
-    /** @return int the request logs taken in */
+    /**
+     * Takes every finished request log, oldest first. A file that cannot be read goes to the quarantine with its
+     * error beside it, so it never blocks the files after it; nothing is lost.
+     *
+     * @return int the request logs taken in
+     */
     public function ingest(int $limit = 200): int
     {
         if (!is_dir($this->logDirectory)) {
@@ -55,37 +60,84 @@ class TrafficIngester
         asort($files);
         $taken = 0;
         foreach (\array_slice(array_keys($files), 0, $limit) as $path) {
-            $this->takeFile($path);
-            ++$taken;
+            try {
+                $this->takeFile($path);
+                ++$taken;
+            } catch (\Throwable $exception) {
+                $this->doctrine->resetManager();
+                $this->quarantine($path, $exception);
+            }
         }
-        $this->linkAccounts();
 
         return $taken;
     }
 
-    public function takeFile(string $path): Exchange
+    /**
+     * One log file into the database: a Codex WebSocket connection gives one exchange per turn, any other file one.
+     * The compressed copy is in the archive before the database row, and the file leaves the logs directory only
+     * after both. Taking a file again (a retry after a failure) replaces its rows instead of adding to them.
+     *
+     * @return list<Exchange>
+     */
+    public function takeFile(string $path): array
     {
         $name = basename($path);
-        $text = (string) file_get_contents($path);
-        $exchange = $this->exchanges->findOneBy(['logFile' => mb_substr($name, 0, 190)]) ?? new Exchange();
-        $this->fill($exchange, $name, $text, (int) filemtime($path));
-        $exchange->archivePath = $this->archive($name, $text, $exchange->occurredAt);
-        $this->entityManager->persist($exchange);
-        $this->entityManager->flush();
+        $text = file_get_contents($path);
+        if (false === $text) {
+            throw new \RuntimeException('Cannot read '.$path);
+        }
+        $log = RequestLog::parse($text);
+        $writtenAt = (int) filemtime($path);
+        $archived = $this->archive($name, $text, $log->startedAt() ?? $this->clock->now());
+        $entityManager = $this->doctrine->getManager();
+
+        $exchanges = [];
+        $timeline = $log->sections['WEBSOCKET TIMELINE'][0] ?? null;
+        if (null !== $timeline && null === $log->status) {
+            foreach (WebsocketTimeline::turns($timeline) as $index => $turn) {
+                $exchange = $this->exchangeFor(mb_substr($name, 0, 180).'#'.($index + 1));
+                $this->fillWebsocketTurn($exchange, $log, $turn);
+                $exchange->archivePath = $archived;
+                // Saved turn by turn: a later turn's tool results find the calls of the earlier ones.
+                $entityManager->persist($exchange);
+                $entityManager->flush();
+                $exchanges[] = $exchange;
+            }
+        }
+        if ([] === $exchanges) {
+            $exchange = $this->exchangeFor(mb_substr($name, 0, 190));
+            $this->fill($exchange, $name, $log, $writtenAt);
+            $exchanges[] = $exchange;
+        }
+        foreach ($exchanges as $exchange) {
+            $exchange->archivePath = $archived;
+            $entityManager->persist($exchange);
+        }
+        $entityManager->flush();
         unlink($path);
-        $this->entityManager->clear();
+        $entityManager->clear();
+
+        return $exchanges;
+    }
+
+    private function exchangeFor(string $logFile): Exchange
+    {
+        $exchange = $this->exchanges->findOneBy(['logFile' => $logFile]);
+        if (null === $exchange) {
+            $exchange = new Exchange();
+            $exchange->logFile = $logFile;
+        }
+        $exchange->clearToolCalls();
 
         return $exchange;
     }
 
-    private function fill(Exchange $exchange, string $name, string $text, int $writtenAt): void
+    private function fill(Exchange $exchange, string $name, RequestLog $log, int $writtenAt): void
     {
-        $log = RequestLog::parse($text);
-        $exchange->logFile = mb_substr($name, 0, 190);
         $exchange->requestTail = preg_match('/-([A-Za-z0-9]{1,8})\.log$/', $name, $match) ? $match[1] : '';
         $exchange->occurredAt = $log->startedAt() ?? $this->clock->now();
         $exchange->endpoint = mb_substr($log->path(), 0, 64);
-        $exchange->client = mb_substr(strtok($log->headers['user-agent'] ?? '', ' ') ?: '', 0, 64);
+        $exchange->client = mb_substr($log->headers['user-agent'] ?? '', 0, 64);
         $exchange->statusCode = $log->status ?? 0;
         $exchange->durationMs = max(0, ($writtenAt - $exchange->occurredAt->getTimestamp()) * 1000);
         $exchange->requestBytes = \strlen($log->requestBody);
@@ -110,12 +162,42 @@ class TrafficIngester
         if ('' === $turn->error && ($exchange->statusCode >= 400 || 0 === $exchange->statusCode)) {
             $turn->error = self::errorText($log->responseBody) ?: self::errorText($log->apiErrors());
         }
+        $exchange->failed = $exchange->statusCode >= 400 || 0 === $exchange->statusCode || '' !== $turn->error;
+        $this->fillTurn($exchange, $turn);
+    }
 
+    /** @param array{at: ?\DateTimeImmutable, endedAt: ?\DateTimeImmutable, request: array<string, mixed>, events: list<array<string, mixed>>, disconnect: string, bytes: int} $timelineTurn */
+    private function fillWebsocketTurn(Exchange $exchange, RequestLog $log, array $timelineTurn): void
+    {
+        // The connection's request id is not any turn's: their usage records are found by session and time.
+        $exchange->requestTail = '';
+        $exchange->occurredAt = $timelineTurn['at'] ?? $log->startedAt() ?? $this->clock->now();
+        $exchange->endpoint = mb_substr($log->path().' (ws)', 0, 64);
+        $exchange->client = mb_substr($log->headers['user-agent'] ?? '', 0, 64);
+        $exchange->provider = 'codex';
+        $exchange->durationMs = null !== $timelineTurn['endedAt'] ? max(0, (int) (($timelineTurn['endedAt']->format('U.u') - $exchange->occurredAt->format('U.u')) * 1000)) : 0;
+        $exchange->requestBytes = \strlen((string) json_encode($timelineTurn['request']));
+        $exchange->responseBytes = $timelineTurn['bytes'];
+
+        $turn = new Turn();
+        ResponsesFormat::readEvents($timelineTurn['request'], $timelineTurn['events'], $turn);
+        $turn->sessionId = $log->headers['session_id'] ?? $log->headers['session-id'] ?? $turn->sessionId;
+        $completed = \in_array($turn->stopReason, ['completed', 'incomplete'], true) || str_starts_with($turn->stopReason, 'incomplete');
+        if ('' === $turn->error && !$completed) {
+            $turn->error = '' !== $timelineTurn['disconnect'] ? 'Ryšys nutrūko: '.$timelineTurn['disconnect'] : 'Atsakymas nebaigtas';
+        }
+        $exchange->statusCode = $completed && '' === $turn->error ? 200 : 0;
+        $exchange->failed = !$completed || '' !== $turn->error;
+        $this->fillTurn($exchange, $turn);
+    }
+
+    private function fillTurn(Exchange $exchange, Turn $turn): void
+    {
         $exchange->provider = mb_substr($exchange->provider, 0, 32);
         $exchange->model = mb_substr($turn->model, 0, 128);
         $exchange->sessionId = mb_substr($turn->sessionId, 0, 64);
         $exchange->stream = $turn->stream;
-        $exchange->failed = $exchange->statusCode >= 400 || 0 === $exchange->statusCode || '' !== $turn->error;
+        $exchange->kind = $turn->kind;
         $exchange->error = mb_substr($turn->error, 0, 8192);
         $exchange->stopReason = mb_substr($turn->stopReason, 0, 64);
         $exchange->inputTokens = $turn->inputTokens;
@@ -126,6 +208,7 @@ class TrafficIngester
         $exchange->promptKind = $turn->promptKind;
         $exchange->prompt = self::cut($turn->prompt, self::MAX_PROMPT);
         $exchange->thinking = self::cut($turn->thinking, self::MAX_TEXT);
+        $exchange->hasThinking = '' !== $turn->thinking;
         $exchange->answer = self::cut($turn->text, self::MAX_TEXT);
         $exchange->messageCount = $turn->messageCount;
         $exchange->systemChars = $turn->systemChars;
@@ -135,6 +218,25 @@ class TrafficIngester
         }
         $exchange->toolErrorCount = \count(array_filter($turn->toolResults, static fn (array $result) => true === $result['isError']));
         $this->answerToolCalls($turn->toolResults, $exchange->occurredAt);
+    }
+
+    /** A file that could not be taken in: kept as it is in quarantine/, with the error in a .error file beside it. */
+    private function quarantine(string $path, \Throwable $exception): void
+    {
+        $directory = \dirname($this->archiveDirectory).'/quarantine';
+        if (!is_dir($directory) && !@mkdir($directory, 0o750, true) && !is_dir($directory)) {
+            return;
+        }
+        $target = $directory.'/'.basename($path);
+        if (@rename($path, $target)) {
+            file_put_contents($target.'.error', \sprintf("%s\n%s: %s\n", $this->clock->now()->format(\DATE_ATOM), $exception::class, $exception->getMessage()));
+        }
+    }
+
+    /** @return list<string> files waiting in quarantine (Įspėjimai shows them) */
+    public function quarantined(): array
+    {
+        return array_map('basename', glob(\dirname($this->archiveDirectory).'/quarantine/*.log') ?: []);
     }
 
     /** @param list<array{callId: string, isError: ?bool, output: string}> $results */
@@ -152,11 +254,17 @@ class TrafficIngester
         }
     }
 
-    /** Account and session of exchanges whose usage record arrived (the usage queue and the logs are separate). */
+    /**
+     * Account, session, kind and CLIProxyAPI's own timing of exchanges whose usage record arrived (the usage queue and
+     * the logs are separate). A request log finds its record by request id; a WebSocket turn by session and time.
+     */
     public function linkAccounts(): void
     {
-        foreach ($this->exchanges->withoutAccount($this->clock->now()->modify('-2 hours')) as $exchange) {
-            $usage = $this->usage->forRequest($exchange->requestTail, $exchange->occurredAt);
+        $entityManager = $this->doctrine->getManager();
+        foreach ($this->exchanges->withoutAccount($this->clock->now()->modify('-1 day')) as $exchange) {
+            $usage = '' !== $exchange->requestTail
+                ? $this->usage->forRequest($exchange->requestTail, $exchange->occurredAt)
+                : $this->usage->forSession($exchange->sessionId, $exchange->occurredAt);
             if (null === $usage) {
                 continue;
             }
@@ -164,6 +272,14 @@ class TrafficIngester
             $exchange->account = $usage->account;
             if ('' === $exchange->sessionId) {
                 $exchange->sessionId = $usage->sessionId;
+            }
+            if (Turn::KIND_SIDE !== $exchange->kind) {
+                $exchange->kind = match (true) {
+                    $usage->isCompaction || 'compaction' === $usage->nodeKind => Turn::KIND_COMPACTION,
+                    'fork' === $usage->nodeKind => Turn::KIND_FORK,
+                    '' !== $usage->parentSessionId => Turn::KIND_SUBAGENT,
+                    default => $exchange->kind,
+                };
             }
             // CLIProxyAPI's own measure beats the log file's write time.
             if ($usage->latencyMs > 0) {
@@ -177,8 +293,8 @@ class TrafficIngester
                 $exchange->reasoningTokens = $usage->reasoningTokens;
             }
         }
-        $this->entityManager->flush();
-        $this->entityManager->clear();
+        $entityManager->flush();
+        $entityManager->clear();
     }
 
     public function archiveFile(Exchange $exchange): ?string
@@ -191,15 +307,27 @@ class TrafficIngester
         return is_file($path) ? $path : null;
     }
 
+    /**
+     * The compressed copy, written to a temporary file, checked and renamed into place: a full disk or a crash never
+     * leaves a half file under the final name. Taking the same file again writes the same name.
+     */
     private function archive(string $name, string $text, \DateTimeImmutable $at): string
     {
         $relative = $at->format('Y-m-d').'/'.$name.'.gz';
         $path = $this->archiveDirectory.'/'.$relative;
-        if (!is_dir(\dirname($path)) && !mkdir(\dirname($path), 0o750, true) && !is_dir(\dirname($path))) {
+        if (!is_dir(\dirname($path)) && !@mkdir(\dirname($path), 0o750, true) && !is_dir(\dirname($path))) {
             throw new \RuntimeException('Cannot create the archive directory '.\dirname($path));
         }
-        file_put_contents($path, gzencode($text, 6));
-        chmod($path, 0o600);
+        $compressed = gzencode($text, 6);
+        $temporary = $path.'.tmp';
+        if (false === $compressed || \strlen($compressed) !== @file_put_contents($temporary, $compressed)) {
+            @unlink($temporary);
+            throw new \RuntimeException('Cannot write the archive copy '.$temporary);
+        }
+        chmod($temporary, 0o600);
+        if (!rename($temporary, $path)) {
+            throw new \RuntimeException('Cannot move the archive copy into place: '.$path);
+        }
 
         return $relative;
     }

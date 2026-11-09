@@ -33,6 +33,9 @@ final readonly class Account
         public array $cooldowns,
         public ?\DateTimeImmutable $lastRefresh,
         public bool $requiresSignIn,
+        /** When CLIProxyAPI saw $signals (the answer that carried them). */
+        public ?\DateTimeImmutable $signalsObservedAt = null,
+        public bool $quotaBlocked = false,
     ) {
     }
 
@@ -78,6 +81,8 @@ final readonly class Account
             cooldowns: $cooldowns,
             lastRefresh: self::date($file['last_refresh'] ?? null),
             requiresSignIn: (bool) ($file['requires_sign_in'] ?? false),
+            signalsObservedAt: self::date($file['quota']['observed_at'] ?? null),
+            quotaBlocked: (bool) ($file['quota_blocked'] ?? false),
         );
     }
 

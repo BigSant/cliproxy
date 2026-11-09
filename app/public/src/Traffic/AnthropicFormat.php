@@ -15,6 +15,9 @@ final class AnthropicFormat
         $turn->systemChars = mb_strlen(Turn::textOf($request['system'] ?? ''));
         $turn->toolsDeclared = \is_array($request['tools'] ?? null) ? \count($request['tools']) : 0;
         $turn->sessionId = self::sessionId($request['metadata']['user_id'] ?? null);
+        if (isset($request['max_tokens']) && (int) $request['max_tokens'] <= 1) {
+            $turn->kind = Turn::KIND_SIDE;
+        }
 
         $last = end($messages);
         if (\is_array($last) && 'user' === ($last['role'] ?? null)) {
@@ -57,8 +60,8 @@ final class AnthropicFormat
     private static function readInput(mixed $content, Turn $turn): void
     {
         if (\is_string($content)) {
-            $turn->prompt = $content;
-            $turn->promptKind = Turn::PROMPT_USER;
+            $turn->prompt = Turn::cleanPrompt($content);
+            $turn->promptKind = '' !== $turn->prompt ? Turn::PROMPT_USER : Turn::PROMPT_NONE;
 
             return;
         }
@@ -77,7 +80,7 @@ final class AnthropicFormat
                 $texts[] = Turn::textOf([$block]);
             }
         }
-        $turn->prompt = implode("\n", $texts);
+        $turn->prompt = Turn::cleanPrompt(implode("\n", $texts));
         $turn->promptKind = [] !== $turn->toolResults ? Turn::PROMPT_TOOL_RESULTS : ('' !== $turn->prompt ? Turn::PROMPT_USER : Turn::PROMPT_NONE);
     }
 
