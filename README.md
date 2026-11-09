@@ -336,8 +336,9 @@ Nauja Claude Code ar Codex versija dažnai veikia tik su nauja CLIProxyAPI, tod�
    CLIProxyAPI konteineris perkuriamas su nauju image, health, nepavykus – rollback.
 
 Tam reikia repo secret `PROD_CLIPROXY_UPDATE_TOKEN`: fine-grained token tik šiam repo, teisė **Actions: write** (jis
-tik paleidžia workflow'ą; commit'ą daro pats workflow). Jis pasiekia hub'ą per kitą Deploy (`CLIPROXY_UPDATE_TOKEN`,
-`APP_ENVIRONMENT`). Be jo nauja versija – tik įspėjimas (su ntfy), atnaujinti reikia pačiam.
+tik paleidžia workflow'ą; commit'ą daro pats workflow). Jis pasiekia hub'ą per Deploy su **images: yes**
+(`CLIPROXY_UPDATE_TOKEN`, `APP_ENVIRONMENT`): konteineris paslaptis gauna tik kuriamas, o įprastas Deploy be
+konteinerių pakeitimų jų neperkuria. Be token'o nauja versija – tik įspėjimas (su ntfy), atnaujinti reikia pačiam.
 
 Įspėjimas „cliproxy:update“ rodo būseną: laukiama image (info), paleista (info), paleista prieš > 1 val., bet vis dar
 veikia senoji (dėmesio + ntfy), GitHub nepriėmė (dėmesio + ntfy), nauja pagrindinė versija ar nėra token'o (dėmesio
