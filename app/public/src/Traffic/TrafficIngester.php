@@ -139,24 +139,11 @@ class TrafficIngester
     public function reparse(string $archivePath): array
     {
         $path = $this->archiveDirectory.'/'.$archivePath;
-        // Expanded in pieces and only up to what the collector parses at all: a well compressed log can be huge.
-        $in = is_file($path) ? @gzopen($path, 'rb') : false;
-        if (false === $in) {
-            throw new \RuntimeException('Cannot read the archive copy '.$archivePath);
-        }
+        // Only an archive that reads back whole replaces what the journal has: a damaged one would empty it.
         $text = '';
-        while (!gzeof($in)) {
-            $chunk = gzread($in, 1_048_576);
-            if (false === $chunk) {
-                break;
-            }
+        self::gunzip($path, self::MAX_PARSE_BYTES, static function (string $chunk) use (&$text) {
             $text .= $chunk;
-            if (\strlen($text) > self::MAX_PARSE_BYTES) {
-                gzclose($in);
-                throw new \RuntimeException('Too large to read again (over '.intdiv(self::MAX_PARSE_BYTES, 1_048_576).' MB expanded): '.$archivePath);
-            }
-        }
-        gzclose($in);
+        });
         $name = basename($archivePath, '.gz');
         $exchanges = $this->record($name, RequestLog::parse($text), (int) filemtime($path), $archivePath);
         $this->doctrine->getManager()->clear();
@@ -379,6 +366,7 @@ class TrafficIngester
     {
         $exchange->requestTail = preg_match('/-([A-Za-z0-9]{1,8})\.log$/', $name, $match) ? $match[1] : '';
         $exchange->occurredAt = $log->startedAt() ?? $this->clock->now();
+        $exchange->occurredMicros = (int) $exchange->occurredAt->format('u');
         $exchange->endpoint = mb_substr($log->path(), 0, 64);
         $exchange->client = mb_substr($log->headers['user-agent'] ?? '', 0, 64);
         $exchange->statusCode = $log->status ?? 0;
@@ -419,6 +407,7 @@ class TrafficIngester
         // Every turn of the connection shares its request id: linkAccounts takes their usage records in order.
         $exchange->requestTail = preg_match('/-([A-Za-z0-9]{1,8})\.log$/', $name, $match) ? $match[1] : '';
         $exchange->occurredAt = $timelineTurn['at'] ?? $log->startedAt() ?? $this->clock->now();
+        $exchange->occurredMicros = (int) $exchange->occurredAt->format('u');
         $exchange->endpoint = mb_substr($log->path().' (ws)', 0, 64);
         $exchange->client = mb_substr($log->headers['user-agent'] ?? '', 0, 64);
         $exchange->provider = 'codex';
@@ -521,32 +510,44 @@ class TrafficIngester
      * Account, session, kind and CLIProxyAPI's own timing of exchanges whose usage record arrived (the usage queue and
      * the logs are separate). A request log finds its record by request id; a WebSocket turn by session and time.
      */
-    public function linkAccounts(): void
+    /** @param ?\DateTimeImmutable $since how far back (the collector: a day; a reparse: from its first day) */
+    public function linkAccounts(?\DateTimeImmutable $since = null): void
     {
         $entityManager = $this->doctrine->getManager();
         $giveUp = $this->clock->now()->modify('-3 hours');
-        foreach ($this->exchanges->withoutAccount($this->clock->now()->modify('-1 day')) as $exchange) {
-            $websocket = str_ends_with($exchange->endpoint, '(ws)');
-            // A prewarm or a token count has no usage record of its own: never linked, never in the queue again.
-            $neverLinked = Turn::KIND_SIDE === $exchange->kind && ($websocket || str_contains($exchange->endpoint, 'count_tokens'));
-            $usage = $neverLinked ? null
-                : ($websocket
-                    ? $this->usage->forWebsocketTurn($exchange->requestTail, $exchange->sessionId, $exchange->occurredAt, $this->nextTurnAt($exchange))
-                    : $this->usage->forRequest($exchange->requestTail, $exchange->occurredAt));
-            if (null === $usage) {
-                // Three hours without a record: it is not coming (usage off then, a record lost upstream).
-                if ($neverLinked || $exchange->occurredAt < $giveUp) {
-                    $exchange->usageRecordId = self::NOT_LINKED;
-                    $entityManager->flush();
-                }
-                continue;
+        $since ??= $this->clock->now()->modify('-1 day');
+        $afterId = 0;
+        // In pages by id, so a long range (a reparse) is gone through whole.
+        while ([] !== ($page = $this->exchanges->withoutAccount($since, $afterId))) {
+            foreach ($page as $exchange) {
+                $afterId = (int) $exchange->getId();
+                $this->link($exchange, $giveUp);
+                // Each link is visible to the next query: two turns never take the same record.
+                $entityManager->flush();
             }
-            $exchange->usageRecordId = $usage->getId();
-            $this->enrich($exchange, $usage);
-            // Each link is visible to the next query: two turns never take the same record.
-            $entityManager->flush();
+            $entityManager->clear();
         }
-        $entityManager->clear();
+    }
+
+    private function link(Exchange $exchange, \DateTimeImmutable $giveUp): void
+    {
+        $websocket = str_ends_with($exchange->endpoint, '(ws)');
+        // A prewarm or a token count has no usage record of its own: never linked, never in the queue again.
+        $neverLinked = Turn::KIND_SIDE === $exchange->kind && ($websocket || str_contains($exchange->endpoint, 'count_tokens'));
+        $usage = $neverLinked ? null
+            : ($websocket
+                ? $this->usage->forWebsocketTurn($exchange->requestTail, $exchange->sessionId, self::startOf($exchange), $this->nextTurnAt($exchange))
+                : $this->usage->forRequest($exchange->requestTail, $exchange->occurredAt));
+        if (null === $usage) {
+            // Three hours without a record: it is not coming (usage off then, a record lost upstream).
+            if ($neverLinked || $exchange->occurredAt < $giveUp) {
+                $exchange->usageRecordId = self::NOT_LINKED;
+            }
+
+            return;
+        }
+        $exchange->usageRecordId = $usage->getId();
+        $this->enrich($exchange, $usage);
     }
 
     /** When the same WebSocket connection's next turn started: this turn's record was written before it. */
@@ -556,7 +557,15 @@ class TrafficIngester
             return null;
         }
 
-        return $this->exchanges->findOneBy(['logFile' => $match[1].'#'.((int) $match[2] + 1)])?->occurredAt;
+        $next = $this->exchanges->findOneBy(['logFile' => $match[1].'#'.((int) $match[2] + 1)]);
+
+        return null === $next ? null : self::startOf($next);
+    }
+
+    /** The exchange's start to the microsecond. */
+    private static function startOf(Exchange $exchange): \DateTimeImmutable
+    {
+        return $exchange->occurredAt->setTime((int) $exchange->occurredAt->format('H'), (int) $exchange->occurredAt->format('i'), (int) $exchange->occurredAt->format('s'), $exchange->occurredMicros);
     }
 
     /** What the usage record adds to an exchange: account, session, kind, CLIProxyAPI's duration, tokens if none. */
@@ -580,7 +589,8 @@ class TrafficIngester
         if ($usage->latencyMs > 0 && !$websocket) {
             $exchange->durationMs = $usage->latencyMs;
         }
-        if (0 === $exchange->inputTokens + $exchange->outputTokens) {
+        // A failed turn never takes the tokens of an answer (a record that is not its own would double them).
+        if (0 === $exchange->inputTokens + $exchange->outputTokens && $exchange->failed === $usage->failed) {
             $exchange->inputTokens = $usage->inputTokens;
             $exchange->outputTokens = $usage->outputTokens;
             $exchange->cacheReadTokens = $usage->cacheReadTokens;
@@ -669,27 +679,58 @@ class TrafficIngester
     /** Reads the compressed copy back whole; only an identical one takes the final name. */
     private function verifyAndPlace(string $temporary, string $path, int $length, string $sha1): void
     {
-        $in = @gzopen($temporary, 'rb');
         $hash = hash_init('sha1');
         $read = 0;
-        while (false !== $in && !gzeof($in)) {
-            $chunk = gzread($in, 1_048_576);
-            if (false === $chunk) {
-                break;
-            }
-            hash_update($hash, $chunk);
-            $read += \strlen($chunk);
+        try {
+            self::gunzip($temporary, $length, static function (string $chunk) use ($hash, &$read) {
+                hash_update($hash, $chunk);
+                $read += \strlen($chunk);
+            });
+        } catch (ArchiveException $exception) {
+            @unlink($temporary);
+            throw $exception;
         }
-        if (false !== $in) {
-            gzclose($in);
-        }
-        if (false === $in || $read !== $length || !hash_equals($sha1, hash_final($hash))) {
+        if ($read !== $length || !hash_equals($sha1, hash_final($hash))) {
             @unlink($temporary);
             throw new ArchiveException(\sprintf('The archive copy %s does not read back whole (%d of %d bytes)', basename($path), $read, $length));
         }
         chmod($temporary, 0o600);
         if (!rename($temporary, $path)) {
             throw new ArchiveException('Cannot move the archive copy into place: '.$path);
+        }
+    }
+
+    /**
+     * Expands a gzip file strictly, in pieces handed to $each: a stream cut short, a damaged one or a wrong checksum
+     * (zlib checks the trailer's CRC-32 and length) is an error, never a shorter text.
+     */
+    private static function gunzip(string $path, int $maxBytes, callable $each): void
+    {
+        $in = is_file($path) ? @fopen($path, 'rb') : false;
+        $inflate = inflate_init(\ZLIB_ENCODING_GZIP);
+        if (false === $in || false === $inflate) {
+            throw new ArchiveException('Cannot read the archive copy '.basename($path));
+        }
+        $expanded = 0;
+        try {
+            while (\ZLIB_STREAM_END !== inflate_get_status($inflate) && !feof($in)) {
+                // Small compressed pieces: one of them expands at most ~1000 times.
+                $compressed = fread($in, 65_536);
+                $chunk = false === $compressed ? false : @inflate_add($inflate, $compressed, \ZLIB_SYNC_FLUSH);
+                if (false === $chunk) {
+                    throw new ArchiveException('The archive copy '.basename($path).' is damaged');
+                }
+                $expanded += \strlen($chunk);
+                if ($expanded > $maxBytes) {
+                    throw new ArchiveException(\sprintf('The archive copy %s expands beyond %d MB', basename($path), intdiv($maxBytes, 1_048_576) ?: 1));
+                }
+                $each($chunk);
+            }
+            if (\ZLIB_STREAM_END !== inflate_get_status($inflate)) {
+                throw new ArchiveException('The archive copy '.basename($path).' is cut short');
+            }
+        } finally {
+            fclose($in);
         }
     }
 

@@ -33,6 +33,10 @@ class Settings
     public const string QUOTA_ROUND_STARTED_AT = 'quota_round_started_at';
     /** Spool lines a replay could not read, by day. */
     public const string USAGE_BROKEN_LINES = 'usage_broken_lines';
+    /** The broken lines (by day) the person has seen: the alert is for more than these. */
+    public const string USAGE_BROKEN_LINES_SEEN = 'usage_broken_lines_seen';
+    /** Written to tell whether the database takes writes (when the usage spool does not). */
+    public const string USAGE_WRITE_PROBE = 'usage_write_probe';
     /** The traffic log (CLIProxyAPI request-log): on unless false; ConfigBaseline keeps CLIProxyAPI to it. */
     public const string REQUEST_LOG = 'request_log';
     /** Set by Įspėjimai; the collector moves the quarantined request logs back into logs/. */

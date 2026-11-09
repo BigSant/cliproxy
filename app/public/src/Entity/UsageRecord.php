@@ -17,6 +17,7 @@ use Doctrine\ORM\Mapping as ORM;
 #[ORM\Index(name: 'usage_account', columns: ['auth_index', 'occurred_at'])]
 #[ORM\Index(name: 'usage_session', columns: ['session_id'])]
 #[ORM\Index(name: 'usage_request', columns: ['request_tail'])]
+#[ORM\Index(name: 'usage_request_id', columns: ['request_id'])]
 #[ORM\UniqueConstraint(name: 'usage_record_key', columns: ['record_key'])]
 class UsageRecord
 {

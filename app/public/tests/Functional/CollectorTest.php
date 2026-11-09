@@ -248,6 +248,28 @@ class CollectorTest extends KernelTestCase
         self::assertCount(1, $this->cliProxy->queue, 'still in CLIProxyAPI\'s queue');
     }
 
+    public function testADatabaseThatReadsButDoesNotWriteIsNoPlaceForTheQueue(): void
+    {
+        $this->cliProxy->queue = [['timestamp' => '2026-11-09T12:00:00Z', 'request_id' => 'r1', 'provider' => 'claude']];
+        $connection = $this->entityManager->getConnection();
+        @mkdir('/tmp/cliproxy-test/usage', 0o777, true);
+        chmod('/tmp/cliproxy-test/usage', 0o500);
+        $connection->executeStatement('PRAGMA query_only = ON');
+        $collector = self::getContainer()->get(Collector::class);
+        try {
+            $collector->collectUsage();
+            self::fail('the failure is reported');
+        } catch (\Exception) {
+        } finally {
+            $connection->executeStatement('PRAGMA query_only = OFF');
+            chmod('/tmp/cliproxy-test/usage', 0o700);
+        }
+
+        self::assertCount(1, $this->cliProxy->queue);
+        self::assertSame(Collector::LEFT_IN_QUEUE, $collector->usageOutcome);
+        self::assertSame(0, $collector->lost);
+    }
+
     public function testALineACrashCutShortStaysOnItsOwnAndIsReported(): void
     {
         $spool = self::getContainer()->get(UsageSpool::class);

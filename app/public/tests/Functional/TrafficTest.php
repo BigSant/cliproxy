@@ -147,6 +147,73 @@ class TrafficTest extends WebTestCase
         self::assertSame('second@example.com', $second->account);
     }
 
+    /** The reviewers' cases: records are stamped with each attempt's start, just after the turn's request. */
+    public function testWebsocketTurnsTakeTheRecordsOfTheirOwnTimeOnly(): void
+    {
+        $event = static fn (string $at, string $type, array $payload) => "Timestamp: 2026-11-09T15:00:$at+02:00\nEvent: websocket.$type\n".json_encode($payload)."\n";
+        $request = static fn (string $text) => ['type' => 'response.create', 'model' => 'gpt-5.5-codex', 'input' => [['type' => 'message', 'role' => 'user', 'content' => $text]]];
+        $failed = ['type' => 'response.failed', 'response' => ['status' => 'failed', 'error' => ['message' => 'upstream']]];
+        $done = ['type' => 'response.completed', 'response' => ['status' => 'completed', 'output' => [], 'usage' => ['input_tokens' => 10, 'output_tokens' => 5]]];
+        $log = static fn (string $timeline) => "=== REQUEST INFO ===\nURL: /v1/responses\nMethod: GET\nTimestamp: 2026-11-09T15:00:00.000000000+02:00\n\n=== HEADERS ===\nUser-Agent: codex\n\n=== WEBSOCKET TIMELINE ===\n".$timeline."\n";
+        // A: the first turn failed upstream (its record failed), the next one 30 s later; C: a switch of accounts within a turn.
+        $this->write('v1-responses-2026-11-09T150000-aaaa1111.log', $log(implode("\n", [
+            $event('00.000000000', 'request', $request('A1')), $event('01.000000000', 'response', $failed),
+            $event('30.000000000', 'request', $request('A2')), $event('31.000000000', 'response', $done),
+        ])));
+        // B: the first turn failed inside CLIProxyAPI (no record), the next one 20 s later.
+        $this->write('v1-responses-2026-11-09T150000-bbbb2222.log', $log(implode("\n", [
+            $event('00.000000000', 'request', $request('B1')), $event('00.100000000', 'response', $failed),
+            $event('20.000000000', 'request', $request('B2')), $event('21.000000000', 'response', $done),
+        ])));
+        $this->write('v1-responses-2026-11-09T150000-cccc3333.log', $log(implode("\n", [
+            $event('00.000000000', 'request', $request('C1')), $event('05.000000000', 'response', $done),
+        ])));
+        $record = static fn (string $at, string $connection, string $account, bool $failed = false) => ['timestamp' => "2026-11-09T13:00:{$at}Z",
+            'request_id' => "conn-$connection", 'provider' => 'codex', 'source' => $account, 'auth_index' => $account, 'failed' => $failed, 'tokens' => $failed ? [] : ['input_tokens' => 222]];
+        $cliProxy = self::getContainer()->get(\App\Tests\Support\FakeCliProxy::class);
+        $cliProxy->queue = [
+            $record('00.040000', 'aaaa1111', 'a1', true), $record('30.040000', 'aaaa1111', 'a2'),
+            $record('20.040000', 'bbbb2222', 'b2'),
+            $record('00.040000', 'cccc3333', 'c-a', true), $record('02.000000', 'cccc3333', 'c-b'),
+        ];
+        $collector = self::getContainer()->get(\App\Usage\Collector::class);
+        $collector->collectUsage();
+        $collector->collectTraffic();
+        $collector->linkTraffic();
+
+        $accounts = [];
+        foreach ($this->entityManager->getRepository(Exchange::class)->findAll() as $exchange) {
+            $accounts[$exchange->prompt] = [$exchange->account, $exchange->inputTokens];
+        }
+        ksort($accounts);
+        self::assertSame([
+            'A1' => ['a1', 0], 'A2' => ['a2', 10],
+            'B1' => ['', 0], 'B2' => ['b2', 10],
+            'C1' => ['c-b', 10],
+        ], $accounts);
+    }
+
+    public function testAReparseOfADamagedArchiveLeavesTheJournalAsItWas(): void
+    {
+        $this->write('v1-messages-2026-11-09T150000-aaaa1111.log', RequestLogs::claudeToolUse());
+        $ingester = self::getContainer()->get(TrafficIngester::class);
+        $ingester->ingest();
+        $archived = $ingester->archived()[0];
+        $gzip = (string) file_get_contents(self::ARCHIVE.'/'.$archived);
+        foreach (['cut short' => substr($gzip, 0, intdiv(\strlen($gzip), 2)), 'a byte flipped' => substr_replace($gzip, \chr(\ord($gzip[40]) ^ 0xFF), 40, 1),
+            'no trailer' => substr($gzip, 0, -8)] as $damage => $bytes) {
+            file_put_contents(self::ARCHIVE.'/'.$archived, $bytes);
+            try {
+                $ingester->reparse($archived);
+                self::fail("$damage: refused");
+            } catch (\App\Traffic\ArchiveException) {
+            }
+            $exchange = $this->entityManager->getRepository(Exchange::class)->findOneBy([]);
+            self::assertSame('tool_use', $exchange->stopReason, $damage);
+            self::assertSame(1, $this->entityManager->getRepository(ToolCall::class)->count([]), $damage);
+        }
+    }
+
     public function testTakingAFileAgainReplacesItsRowsInsteadOfAdding(): void
     {
         $this->write('v1-messages-2026-11-09T150000-aaaa1111.log', RequestLogs::claudeToolUse());

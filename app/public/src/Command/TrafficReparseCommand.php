@@ -27,6 +27,8 @@ class TrafficReparseCommand
     {
         // The traffic lock for the whole run: the collector skips its traffic steps meanwhile (the logs wait in logs/),
         // while usage records and limits go on being collected (CLIProxyAPI's usage queue keeps them only an hour).
+        // As much as the collector gets (crontab): an archive expands up to 256 MB and is parsed whole.
+        ini_set('memory_limit', '2G');
         $lock = $this->lockFactory->createLock(TrafficIngester::LOCK, ttl: 300);
         $lock->acquire(true);
         $done = $failed = 0;
@@ -42,8 +44,8 @@ class TrafficReparseCommand
                 }
                 $lock->refresh();
             }
-            // Rebuilt turns find their usage records again.
-            $this->ingester->linkAccounts();
+            // Rebuilt turns find their usage records again, over the whole range read.
+            $this->ingester->linkAccounts(new \DateTimeImmutable(($from ?? '2000-01-01').' 00:00:00'));
         } finally {
             $lock->release();
         }

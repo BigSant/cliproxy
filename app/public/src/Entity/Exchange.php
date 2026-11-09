@@ -30,6 +30,9 @@ class Exchange
 
     #[ORM\Column(type: 'utc_datetime_immutable')]
     public \DateTimeImmutable $occurredAt;
+    /** The microseconds of the start (the column keeps seconds): a WebSocket turn's usage record is told by them. */
+    #[ORM\Column(options: ['default' => 0])]
+    public int $occurredMicros = 0;
     /** The last eight characters of CLIProxyAPI's request id: the log file's name ends with them, as usage records do. */
     #[ORM\Column(length: 8)]
     public string $requestTail = '';

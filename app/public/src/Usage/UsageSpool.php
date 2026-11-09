@@ -138,14 +138,17 @@ class UsageSpool
         return $this->broken[$day] ?? 0;
     }
 
-    /** Whether a line can be appended now (a probe: an empty line, which read() skips). */
+    /** Below this much free space a batch is not trusted to fit (a byte would, in a block already taken). */
+    private const int MIN_FREE_BYTES = 64 * 1_048_576;
+
+    /** Whether a batch can be appended now: the directory writable, with room to spare. */
     public function writable(): bool
     {
         try {
             $this->ensureDirectory();
-            $handle = @fopen($this->directory.'/.probe', 'ab');
+            $free = @disk_free_space($this->directory);
 
-            return false !== $handle && 1 === fwrite($handle, "\n") && fflush($handle) && fclose($handle);
+            return is_writable($this->directory) && false !== $free && $free >= self::MIN_FREE_BYTES;
         } catch (\Throwable) {
             return false;
         }

@@ -39,7 +39,7 @@ Symfony 8.1 skydelis.
   `entrypoint.sh` deploy'us konteinerį perkuria. Šablonas į maišą neįeina: jis veikia tik tuščią katalogą, o be reikalo
   perkurtas CLIProxyAPI nutrauktų vykstančias sesijas. CI (`checks.yml`, lint) atmeta pasenusią reikšmę.
 - **Health** (`/_health`) tikrina DB ir CLIProxyAPI (su priimtu management raktu – 401 nėra „veikia“); CLIProxyAPI
-  po perkūrimo laukiama ne ilgiau kaip 8 s iš viso, kartu su lėtais atsakymais (setup health užklausa laukia 10 s). Kuriam nors neveikiant – 503, deploy'us grąžinamas.
+  po perkūrimo laukiama, bet visas atsakymas – per `HEALTH_DEADLINE_SECONDS` (8 s; setup health užklausa laukia 10 s). Kuriam nors neveikiant – 503, deploy'us grąžinamas.
 - **Duomenų politika config.yaml redaktoriuje**: išsaugojimas atmetamas, jei YAML neturi aiškiai įrašytų
   `logs-max-total-size-mb: 0`, `error-logs-max-files: 0`, `usage-statistics-enabled: true`, `request-log: true` (kol
   srauto žurnalas įjungtas) ir bent vieno netuščio kliento rakto – praleistam raktui galiotų CLIProxyAPI numatytoji
@@ -139,7 +139,9 @@ header'iai užmaskuoti). Kolektorius (`src/Traffic/`) kas 5 s paima baigtus fail
   kartą įrašai pakeičiami, o jau gauti įrankių rezultatai išlieka;
 - `app:traffic:reparse [--from=YYYY-MM-DD]` perskaito archyvą iš naujo dabartiniu parseriu (seni įrašai gauna WS
   skaidymą, švarius prompt'us, tipus), išsaugodamas rezultatus ir susiejimus (paskyra, sesija, trukmė, tokenai grąžinami
-  iš susieto usage įrašo; pabaigoje susiejimas paleidžiamas iš naujo). Senas viso WS ryšio įrašas lieka, pažymėtas
+  iš susieto usage įrašo; pabaigoje susiejimas paleidžiamas iš naujo visam `--from` intervalui). Archyvas skaitomas
+  griežtai: nukirptas, pažeistas ar su neteisinga kontroline suma (gzip CRC) – klaida, žurnalo įrašas neliečiamas.
+  Komanda pati pasiima `memory_limit=2G`. Senas viso WS ryšio įrašas lieka, pažymėtas
   `superseded`, ir nebeskaičiuojamas. Reparse ir `app:traffic:retry` laiko srauto lock'ą (`app-traffic`): kolektorius
   tuo metu praleidžia srauto žingsnius (failai laukia `logs/`), o usage ir limitus renka toliau; per didelis archyvas
   praleidžiamas su pranešimu;
@@ -171,9 +173,12 @@ Apžvalgoje ir Įspėjimuose, kiti dirba toliau.
    paketas išvalomas (kliento raktas – tik `…` + 4 paskutiniai simboliai, iš atsakymo antraščių lieka tik limitų,
    retry ir request id), **pirma** prirašomas į spool'ą `cliproxy-traffic/usage/YYYY-MM-DD.jsonl` (0600, fsync), diena
    pažymima „laukia“, tada įrašoma į DB ir žymė nuimama (write-ahead): lūžus procesui ar DB kitas paleidimas dieną
-   įrašo pats; DB neveikiant eilė vis tiek imama (į spool'ą), kad CLIProxyAPI jos nepamestų, o jei neveikia ir DB, ir
-   spool'as – eilė neliečiama (CLIProxyAPI ją laiko valandą). Lūžio nukirpta eilutė lieka atskira (kitas paketas
-   prasideda nauja eilute), replay ją praleidžia ir apie ją praneša Įspėjimuose; failas neliečiamas. Kas valandą šiandiena ir
+   įrašo pats; DB neveikiant eilė vis tiek imama (į spool'ą), kad CLIProxyAPI jos nepamestų, o jei nei spool'as (katalogas
+   nerašomas ar laisvos vietos < 64 MB), nei DB (bandomasis rašymas) įrašų nepriima – eilė neliečiama (CLIProxyAPI ją
+   laiko valandą). Jei paketo nepriėmė nei spool'as, nei DB, daugiau paketų neimama, o to paketo įrašai išrašomi į
+   cron log'ą (`usage-record-lost …`) ir keliamas ERROR įspėjimas `usage:lost`. Lūžio nukirpta eilutė lieka atskira (kitas paketas
+   prasideda nauja eilute), replay ją praleidžia ir apie ją praneša Įspėjimuose (mygtukas „peržiūrėjau“ įspėjimą uždaro iki naujų);
+   failas neliečiamas. Kas valandą šiandiena ir
    vakar dar kartą (pigu, idempotentiška). Įrašas saugomas visas (`usage_record.raw`, plius `ttft_ms`, `user_agent`,
    `reasoning_effort`, `parent_session_id`, `node_kind`, …), `record_key` (sha1) neleidžia dublikatų. Ranka –
    `php bin/console app:usage:replay <diena>|--all` (bendras lock'as; atpažįsta ir senus, prieš išvalymą įrašytus
@@ -182,8 +187,9 @@ Apžvalgoje ir Įspėjimuose, kiti dirba toliau.
    nepavykę ne `superseded`, „bandymai“ = visi. Taip ir paskyrų, modelių, dienų suvestinės niekada netampa neigiamos;
    Codex WebSocket turn'ai turi bendrą `request_id`, bet po sėkmingo turn'o kitas nėra pakartojimas.
 2. Kas 5 s – request log'ai į žurnalą ir archyvą; kartą per paleidimą – paskyrų susiejimas (prewarm, `count_tokens` ir
-   per 3 val. nesusieti įrašai pažymimi `usage_record_id = 0` ir eilės nebeužkemša; WS turn'as ima pirmą laisvą,
-   ne `superseded` įrašą iki to paties ryšio kito turn'o pradžios) ir „našlaičių“ WS dalių
+   per 3 val. nesusieti įrašai pažymimi `usage_record_id = 0` ir eilės nebeužkemša; WS turn'as ima paskutinį laisvą
+   įrašą nuo savo pradžios iki to paties ryšio kito turn'o pradžios, mikrosekundžių tikslumu – CLIProxyAPI įrašo laikas
+   yra bandymo pradžia, po turn'o užklausos; nepavykęs turn'as svetimų tokenų neperima) ir „našlaičių“ WS dalių
    (`logs/request-log-parts-*`, parą nekeistų) **kopija** į `archive/orphans/<diena>/` – CLIProxyAPI failai nejudinami,
    nes ilgas WS ryšys gali tylėti valandą ir tęstis.
 3. Kai laikas arba paspaudus „Perskaityti“ – limitai (`quota_snapshot`) ir prioritetai. Paskyros skaitomos nuo

@@ -15,11 +15,11 @@ use Symfony\Component\Routing\Attribute\Route;
  */
 class HealthController
 {
-    private const float DEADLINE_SECONDS = 8;
-
     public function __construct(
         #[Autowire('%env(int:HEALTH_RETRY_MICROSECONDS)%')]
         private readonly int $retryMicroseconds = 2_000_000,
+        #[Autowire('%env(float:HEALTH_DEADLINE_SECONDS)%')]
+        private readonly float $deadlineSeconds = 8,
     ) {
     }
 
@@ -29,6 +29,8 @@ class HealthController
         Connection $connection,
         ManagementClient $client,
     ): JsonResponse {
+        // The whole answer within the deadline: setup's health request waits 10 s.
+        $deadline = microtime(true) + $this->deadlineSeconds;
         $release = is_file($releaseFile) ? trim((string) file_get_contents($releaseFile)) : '';
         $checks = [];
         try {
@@ -37,12 +39,12 @@ class HealthController
         } catch (\Throwable) {
             $checks['database'] = 'down';
         }
-        // A deploy that recreates CLIProxyAPI checks this while it starts: give it at most 8 seconds in all, waits and
-        // slow answers together (setup's health request waits 10).
-        $deadline = microtime(true) + self::DEADLINE_SECONDS;
-        $version = $client->version(min(3, self::DEADLINE_SECONDS));
-        while (null === $version && microtime(true) + $this->retryMicroseconds / 1e6 + 0.5 < $deadline) {
-            usleep($this->retryMicroseconds);
+        // A deploy that recreates CLIProxyAPI checks this while it starts: tries until the deadline, waits and slow
+        // answers together.
+        $pause = max(100_000, $this->retryMicroseconds);
+        $version = $client->version(max(0.5, min(3, $deadline - microtime(true))));
+        while (null === $version && microtime(true) + $pause / 1e6 + 0.5 < $deadline) {
+            usleep($pause);
             $version = $client->version(min(3, $deadline - microtime(true)));
         }
         $checks['cliproxy'] = $version ?? 'down';

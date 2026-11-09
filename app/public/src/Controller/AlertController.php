@@ -37,4 +37,17 @@ class AlertController extends AbstractController
 
         return $this->redirectToRoute('app_alerts');
     }
+
+    /** The broken spool lines known now are seen: the alert comes back only for new ones. The lines stay in the files. */
+    #[Route('/alerts/broken-lines-seen', name: 'app_alerts_broken_seen', methods: ['POST'])]
+    public function brokenLinesSeen(Request $request, Settings $settings): RedirectResponse
+    {
+        if (!$this->isCsrfTokenValid('alerts', (string) $request->request->get('_token'))) {
+            throw $this->createAccessDeniedException('Invalid CSRF token');
+        }
+        $settings->set(Settings::USAGE_BROKEN_LINES_SEEN, (array) ($settings->get(Settings::USAGE_BROKEN_LINES) ?? []));
+        $this->addFlash('success', 'Pažymėta. Įspėjimas užsidarys per minutę.');
+
+        return $this->redirectToRoute('app_alerts');
+    }
 }

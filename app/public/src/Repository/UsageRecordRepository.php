@@ -207,8 +207,10 @@ class UsageRecordRepository extends ServiceEntityRepository
 
     /**
      * A Codex WebSocket turn's usage record: the connection's request id (all its turns share it) or, without one, the
-     * session; the first record not linked yet from shortly before the turn started (the record is written when the
-     * turn ends, after the timeline's request) until the connection's next turn started.
+     * session. CLIProxyAPI stamps a record with its attempt's start, after the timeline's request, so a turn's records
+     * lie from its start to the connection's next turn's start (exclusive, to the microsecond). Of those the last one
+     * not linked yet: after a switch to another account, the attempt that answered. Superseded attempts count too –
+     * a failed turn the next one followed has only such a record.
      */
     public function forWebsocketTurn(string $requestTail, string $sessionId, \DateTimeImmutable $at, ?\DateTimeImmutable $nextTurnAt = null): ?UsageRecord
     {
@@ -216,16 +218,16 @@ class UsageRecordRepository extends ServiceEntityRepository
         if (null !== $nextTurnAt && $nextTurnAt < $until) {
             $until = $nextTurnAt;
         }
+        // Whole seconds in SQL (the column keeps them), the microseconds below.
         $query = $this->createQueryBuilder('u')
             ->where('u.occurredAt BETWEEN :from AND :to')
-            ->andWhere('u.superseded = false')
             // Taken by a turn still in the journal; one a re-read replaced does not hold it.
-            ->andWhere("NOT EXISTS (SELECT 1 FROM App\Entity\Exchange e WHERE e.usageRecordId = u.id AND e.kind <> 'superseded')")
-            ->setParameter('from', $at->modify('-2 seconds'), 'utc_datetime_immutable')
+            ->andWhere("NOT EXISTS (SELECT 1 FROM App\\Entity\\Exchange e WHERE e.usageRecordId = u.id AND e.kind <> 'superseded')")
+            ->setParameter('from', $at->setTime((int) $at->format('H'), (int) $at->format('i'), (int) $at->format('s')), 'utc_datetime_immutable')
             ->setParameter('to', $until, 'utc_datetime_immutable')
             ->orderBy('u.occurredAt', 'ASC')
             ->addOrderBy('u.id', 'ASC')
-            ->setMaxResults(1);
+            ->setMaxResults(200);
         if ('' !== $requestTail) {
             $query->andWhere('u.requestTail = :tail')->setParameter('tail', $requestTail);
         } elseif ('' !== $sessionId) {
@@ -233,8 +235,18 @@ class UsageRecordRepository extends ServiceEntityRepository
         } else {
             return null;
         }
+        $micros = static fn (\DateTimeImmutable $instant) => $instant->getTimestamp() * 1_000_000 + (int) $instant->format('u');
+        $from = $micros($at);
+        $to = $micros($until);
+        $last = null;
+        foreach ($query->getQuery()->getResult() as $record) {
+            $time = $record->occurredAt->getTimestamp() * 1_000_000 + $record->occurredMicros;
+            if ($time >= $from && $time < $to && (null === $last || $time >= $last[0])) {
+                $last = [$time, $record];
+            }
+        }
 
-        return $query->getQuery()->getOneOrNullResult();
+        return $last[1] ?? null;
     }
 
     /** @return list<array<string, int|string>> */
