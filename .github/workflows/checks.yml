@@ -10,6 +10,10 @@ name: Checks
 # checked: they run on the runner itself, and a branch must not be able to change what runs there. A change to
 # .github/ci/ therefore takes effect once it is on master.
 #
+# A merge commit on master whose tree is the one its PR branch had (the branch was up to date) is not checked again:
+# the "reuse" job finds the branch's green phpunit, lint and release runs, and the three jobs here then pass at once,
+# so the deploy gate still sees all three green on master's commit.
+#
 # Needs: the self-hosted runner of setup-server (labels below). No secrets, no variables.
 on:
   push:
@@ -17,6 +21,7 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+  checks: read
 concurrency:
   group: checks-${{ github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
@@ -26,51 +31,92 @@ env:
   PHP_IMAGE: php:8.5-cli-bookworm@sha256:104890ada56869090c9cd0ec709fe205834d3e383b46d9995dc16cd6388a9302
   COMPOSER_IMAGE: composer:2.11.0@sha256:278dfc7bd35169965d03f87194816f43bf4e6b6ea61707c2114e52ad12fe24ce
 jobs:
+  reuse:
+    runs-on: [self-hosted, linux, setup.build]
+    timeout-minutes: 5
+    outputs:
+      from: ${{ steps.find.outputs.from }}
+    steps:
+      - id: find
+        name: The same tree already green on the PR branch?
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          [ "$GITHUB_REF" = refs/heads/master ] && [ "$GITHUB_EVENT_NAME" = push ] || exit 0
+          commit=$(gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA" --jq '[.commit.tree.sha, (.parents | length), (.parents[1].sha // "")] | @tsv')
+          read -r tree parents branch <<<"$commit"
+          [ "$parents" = 2 ] || exit 0
+          [ "$(gh api "repos/$GITHUB_REPOSITORY/commits/$branch" --jq .commit.tree.sha)" = "$tree" ] \
+            || { echo "The merge changed the tree (master moved on): checking again."; exit 0; }
+          for check in phpunit lint release; do
+            conclusion=$(gh api "repos/$GITHUB_REPOSITORY/commits/$branch/check-runs?check_name=$check" \
+              --jq '[.check_runs[] | select(.conclusion != null)] | sort_by(.completed_at) | last | .conclusion // ""')
+            [ "$conclusion" = success ] || { echo "$check is not green on $branch: checking again."; exit 0; }
+          done
+          echo "Tree $tree passed on $branch."
+          echo "from=$branch" >> "$GITHUB_OUTPUT"
   phpunit:
+    needs: reuse
     runs-on: [self-hosted, linux, setup.build]
     timeout-minutes: 30
     steps:
+      - if: needs.reuse.outputs.from != ''
+        run: echo "Same tree green on ${{ needs.reuse.outputs.from }}."
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        if: needs.reuse.outputs.from == ''
         with:
           path: source
           persist-credentials: false
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        if: needs.reuse.outputs.from == ''
         with:
           ref: master
           path: ci
           sparse-checkout: .github/ci
           persist-credentials: false
       - name: Install dependencies (network, no scripts or plugins)
+        if: needs.reuse.outputs.from == ''
         run: ci/.github/ci/install source
       - name: PHPUnit without network
+        if: needs.reuse.outputs.from == ''
         run: |
           image=$(ci/.github/ci/php-image)
           code=$(ci/.github/ci/checkout-code source)
           docker run --rm --network none -u "$(id -u):$(id -g)" -e HOME=/tmp -e APP_ENV=test \
             -v "$code:/app" -w /app "$image" php bin/phpunit
   lint:
+    needs: reuse
     runs-on: [self-hosted, linux, setup.build]
     timeout-minutes: 15
     steps:
+      - if: needs.reuse.outputs.from != ''
+        run: echo "Same tree green on ${{ needs.reuse.outputs.from }}."
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        if: needs.reuse.outputs.from == ''
         with:
           path: source
           persist-credentials: false
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        if: needs.reuse.outputs.from == ''
         with:
           ref: master
           path: ci
           sparse-checkout: .github/ci
           persist-credentials: false
       - name: Install dependencies (network, no scripts or plugins)
+        if: needs.reuse.outputs.from == ''
         run: ci/.github/ci/install source
       - name: CLIPROXY_CONFIG_REV matches app/config/cliproxy/entrypoint.sh
+        if: needs.reuse.outputs.from == ''
         # A stale value would let a deploy keep the old container with the old entrypoint.
         run: |
           want=$(sha256sum source/app/config/cliproxy/entrypoint.sh | cut -c1-12)
           have=$(sed -n 's/^CLIPROXY_CONFIG_REV=//p' source/app/env/common.env)
           [ "$want" = "$have" ] || { echo "::error::CLIPROXY_CONFIG_REV in app/env/common.env is $have; entrypoint.sh needs $want"; exit 1; }
       - name: Lint without network
+        if: needs.reuse.outputs.from == ''
         run: |
           image=$(ci/.github/ci/php-image)
           code=$(ci/.github/ci/checkout-code source)
@@ -83,20 +129,26 @@ jobs:
   release:
     # setup's release build without a database (composer install --no-dev with its scripts, then build.sh). Not one
     # of the deploy gate's three checks: it fails a branch early, where the deploy would fail later.
+    needs: reuse
     runs-on: [self-hosted, linux, setup.build]
     timeout-minutes: 20
     steps:
+      - if: needs.reuse.outputs.from != ''
+        run: echo "Same tree green on ${{ needs.reuse.outputs.from }}."
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        if: needs.reuse.outputs.from == ''
         with:
           path: source
           persist-credentials: false
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        if: needs.reuse.outputs.from == ''
         with:
           ref: master
           path: ci
           sparse-checkout: .github/ci
           persist-credentials: false
       - name: Release build without a database
+        if: needs.reuse.outputs.from == ''
         run: |
           # Until the script is on master (the trusted copy), there is nothing to run yet.
           if [ ! -x ci/.github/ci/release-build ]; then

@@ -286,6 +286,9 @@ setup-server (šis kompiuteris, `SETUP_SERVER_ROOT=/home/tomas/Projects/runtime/
 - deploy key `github-bigsant.cliproxy` (tik skaitymui), runner'is `setup-server-github-runner@bigsant.cliproxy`
   (`cachyos-x8664-cliproxy`, žyma `setup.build`).
 
+Checks master'yje nekartojami, jei merge commit'o medis (tree) toks pat kaip PR šakos, kurioje jie jau žali
+(šaka buvo naujausia): `reuse` job'as tai patikrina, o trys check'ai iškart baigiasi sėkme.
+
 Actions → **Deploy** → Run workflow (master). Workflow patikrina, kad `phpunit`, `lint`, `release` žali tame commit'e,
 paleidžia setup `pipeline-deploy` (su DB kopija), `deploy-health` (`/login`, `/_health`) ir nepavykus grąžina
 ankstesnį release'ą. Paslaptys – repo Actions secrets `PROD_APP_SECRET`, `PROD_ADMIN_PASSWORD`,
