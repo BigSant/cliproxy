@@ -376,6 +376,14 @@ class TrafficTest extends WebTestCase
         self::getContainer()->get(TrafficIngester::class)->ingest();
 
         self::assertSame('Sutvarkyk testus', $this->entityManager->getRepository(Exchange::class)->findOneBy([])->prompt);
+
+        // Reminders as a system message after the person's.
+        $this->write('v1-messages-2026-11-09T150001-cccc2222.log', RequestLogs::file('/v1/messages', ['model' => 'claude-fable-5-1', 'messages' => [
+            ['role' => 'user', 'content' => [['type' => 'text', 'text' => 'Paleisk build']]],
+            ['role' => 'system', 'content' => [['type' => 'text', 'text' => 'The date is …']]],
+        ]], '{"type":"message","content":[],"usage":{}}'));
+        self::getContainer()->get(TrafficIngester::class)->ingest();
+        self::assertSame('Paleisk build', $this->entityManager->getRepository(Exchange::class)->findOneBy(['requestTail' => 'cccc2222'])->prompt);
         self::assertSame('Paleisk', \App\Traffic\Turn::cleanPrompt("# AGENTS.md instructions for /home/x\n\n<INSTRUCTIONS>\n# Taisyklės\n</INSTRUCTIONS>\n\nPaleisk"), 'Codex\'s AGENTS.md');
     }
 
