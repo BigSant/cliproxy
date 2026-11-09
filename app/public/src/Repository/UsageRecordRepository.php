@@ -135,12 +135,12 @@ class UsageRecordRepository extends ServiceEntityRepository
      *
      * @param list<string> $requestIds
      *
-     * @return list<array{request_id: string, at: int, failed: bool, id: int}>
+     * @return list<array{request_id: string, at: float, failed: bool, id: int}>
      */
     public function attemptsOf(array $requestIds): array
     {
         $rows = $this->getEntityManager()->getConnection()->createQueryBuilder()
-            ->select('id, request_id, occurred_at, failed')
+            ->select('id, request_id, occurred_at, occurred_micros, failed')
             ->from('usage_record')
             ->where('request_id IN (:ids)')
             ->setParameter('ids', $requestIds, \Doctrine\DBAL\ArrayParameterType::STRING)
@@ -148,7 +148,7 @@ class UsageRecordRepository extends ServiceEntityRepository
 
         return array_map(static fn (array $row) => [
             'request_id' => (string) $row['request_id'],
-            'at' => (new \DateTimeImmutable((string) $row['occurred_at'], new \DateTimeZone('UTC')))->getTimestamp(),
+            'at' => (new \DateTimeImmutable((string) $row['occurred_at'], new \DateTimeZone('UTC')))->getTimestamp() + (int) $row['occurred_micros'] / 1e6,
             'failed' => (bool) $row['failed'],
             'id' => (int) $row['id'],
         ], $rows);
@@ -193,6 +193,8 @@ class UsageRecordRepository extends ServiceEntityRepository
 
         return $this->createQueryBuilder('u')
             ->where('u.requestTail = :tail')
+            // A retried request's earlier attempts are not its answer.
+            ->andWhere('u.superseded = false')
             ->andWhere('u.occurredAt BETWEEN :from AND :to')
             ->setParameter('tail', $requestTail)
             ->setParameter('from', $at->modify('-5 minutes'), 'utc_datetime_immutable')
@@ -206,15 +208,21 @@ class UsageRecordRepository extends ServiceEntityRepository
     /**
      * A Codex WebSocket turn's usage record: the connection's request id (all its turns share it) or, without one, the
      * session; the first record not linked yet from shortly before the turn started (the record is written when the
-     * turn ends, after the timeline's request).
+     * turn ends, after the timeline's request) until the connection's next turn started.
      */
-    public function forWebsocketTurn(string $requestTail, string $sessionId, \DateTimeImmutable $at): ?UsageRecord
+    public function forWebsocketTurn(string $requestTail, string $sessionId, \DateTimeImmutable $at, ?\DateTimeImmutable $nextTurnAt = null): ?UsageRecord
     {
+        $until = $at->modify('+30 minutes');
+        if (null !== $nextTurnAt && $nextTurnAt < $until) {
+            $until = $nextTurnAt;
+        }
         $query = $this->createQueryBuilder('u')
             ->where('u.occurredAt BETWEEN :from AND :to')
-            ->andWhere('NOT EXISTS (SELECT 1 FROM App\Entity\Exchange e WHERE e.usageRecordId = u.id)')
+            ->andWhere('u.superseded = false')
+            // Taken by a turn still in the journal; one a re-read replaced does not hold it.
+            ->andWhere("NOT EXISTS (SELECT 1 FROM App\Entity\Exchange e WHERE e.usageRecordId = u.id AND e.kind <> 'superseded')")
             ->setParameter('from', $at->modify('-2 seconds'), 'utc_datetime_immutable')
-            ->setParameter('to', $at->modify('+30 minutes'), 'utc_datetime_immutable')
+            ->setParameter('to', $until, 'utc_datetime_immutable')
             ->orderBy('u.occurredAt', 'ASC')
             ->addOrderBy('u.id', 'ASC')
             ->setMaxResults(1);

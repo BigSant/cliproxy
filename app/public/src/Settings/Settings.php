@@ -29,6 +29,10 @@ class Settings
     public const string QUOTA_ERRORS = 'quota_errors';
     /** When each account's limits were last asked for, by auth index: the read goes on from the oldest. */
     public const string QUOTA_ATTEMPTED_AT = 'quota_attempted_at';
+    /** The start of a limits round still under way (null: none). */
+    public const string QUOTA_ROUND_STARTED_AT = 'quota_round_started_at';
+    /** Spool lines a replay could not read, by day. */
+    public const string USAGE_BROKEN_LINES = 'usage_broken_lines';
     /** The traffic log (CLIProxyAPI request-log): on unless false; ConfigBaseline keeps CLIProxyAPI to it. */
     public const string REQUEST_LOG = 'request_log';
     /** Set by Įspėjimai; the collector moves the quarantined request logs back into logs/. */

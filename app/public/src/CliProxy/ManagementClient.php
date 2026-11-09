@@ -178,10 +178,10 @@ class ManagementClient
     }
 
     /** CLIProxyAPI's own version from its response headers, or null when it does not answer. */
-    public function version(): ?string
+    public function version(float $timeout = 3): ?string
     {
         try {
-            $response = $this->request('GET', '/config', timeout: 3);
+            $response = $this->request('GET', '/config', timeout: $timeout);
             // CLIProxyAPI names its version on a refused request too: only an accepted key counts as working.
             if ($response->getStatusCode() >= 300) {
                 return null;

@@ -15,6 +15,9 @@ class UsageSpool
 {
     private const string PENDING = '.pending';
 
+    /** @var array<string, int> */
+    private array $broken = [];
+
     public function __construct(
         #[Autowire('%env(USAGE_SPOOL_DIR)%')]
         private readonly string $directory,
@@ -38,6 +41,15 @@ class UsageSpool
         }
         $path = $this->path($day);
         $new = !is_file($path);
+        // A line a crash cut short stays a line of its own (counted as broken on replay), never glued to the next one.
+        if (!$new && filesize($path) > 0) {
+            $tail = fopen($path, 'rb');
+            fseek($tail, -1, \SEEK_END);
+            if ("\n" !== fread($tail, 1)) {
+                $lines = "\n".$lines;
+            }
+            fclose($tail);
+        }
         $handle = fopen($path, 'ab');
         // Every byte or an error: a short write (a full disk) must not pass for a stored batch.
         if (false === $handle || \strlen($lines) !== fwrite($handle, $lines) || !fflush($handle) || !fsync($handle)) {
@@ -98,10 +110,16 @@ class UsageSpool
         }
         $handle = fopen($path, 'rb');
         $records = [];
+        $this->broken[$day] = 0;
         while (false !== ($line = fgets($handle))) {
+            if ('' === trim($line)) {
+                continue;
+            }
             $record = json_decode($line, true);
             if (\is_array($record)) {
                 $records[] = $record;
+            } else {
+                ++$this->broken[$day];
             }
             if (\count($records) >= $batch) {
                 yield $records;
@@ -111,6 +129,25 @@ class UsageSpool
         fclose($handle);
         if ([] !== $records) {
             yield $records;
+        }
+    }
+
+    /** Lines of a day that are not a record (cut short by a crash), counted by the last read(). */
+    public function brokenLines(string $day): int
+    {
+        return $this->broken[$day] ?? 0;
+    }
+
+    /** Whether a line can be appended now (a probe: an empty line, which read() skips). */
+    public function writable(): bool
+    {
+        try {
+            $this->ensureDirectory();
+            $handle = @fopen($this->directory.'/.probe', 'ab');
+
+            return false !== $handle && 1 === fwrite($handle, "\n") && fflush($handle) && fclose($handle);
+        } catch (\Throwable) {
+            return false;
         }
     }
 
@@ -133,7 +170,7 @@ class UsageSpool
 
     private function ensureDirectory(): void
     {
-        if (!is_dir($this->directory) && !mkdir($this->directory, 0o750, true) && !is_dir($this->directory)) {
+        if (!is_dir($this->directory) && !@mkdir($this->directory, 0o750, true) && !is_dir($this->directory)) {
             throw new \RuntimeException('Cannot create the usage spool '.$this->directory);
         }
     }

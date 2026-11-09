@@ -15,6 +15,8 @@ use Symfony\Component\Routing\Attribute\Route;
  */
 class HealthController
 {
+    private const float DEADLINE_SECONDS = 8;
+
     public function __construct(
         #[Autowire('%env(int:HEALTH_RETRY_MICROSECONDS)%')]
         private readonly int $retryMicroseconds = 2_000_000,
@@ -35,12 +37,13 @@ class HealthController
         } catch (\Throwable) {
             $checks['database'] = 'down';
         }
-        // A deploy that recreates CLIProxyAPI checks this while it starts: give it up to ~8 seconds (setup's health
-        // request waits 10).
-        $version = $client->version();
-        for ($try = 0; null === $version && $try < 4; ++$try) {
+        // A deploy that recreates CLIProxyAPI checks this while it starts: give it at most 8 seconds in all, waits and
+        // slow answers together (setup's health request waits 10).
+        $deadline = microtime(true) + self::DEADLINE_SECONDS;
+        $version = $client->version(min(3, self::DEADLINE_SECONDS));
+        while (null === $version && microtime(true) + $this->retryMicroseconds / 1e6 + 0.5 < $deadline) {
             usleep($this->retryMicroseconds);
-            $version = $client->version();
+            $version = $client->version(min(3, $deadline - microtime(true)));
         }
         $checks['cliproxy'] = $version ?? 'down';
         $healthy = !\in_array('down', $checks, true);

@@ -51,6 +51,9 @@ class UsageRecord
      * Counting by these (not by the retries) keeps every group – account, model, day – from going negative. */
     #[ORM\Column(options: ['default' => false])]
     public bool $superseded = false;
+    /** The microseconds of the timestamp (the column keeps seconds): attempts in one second keep their order. */
+    #[ORM\Column(options: ['default' => 0])]
+    public int $occurredMicros = 0;
     /** @var array<string, mixed> */
     #[ORM\Column(type: Types::JSON, nullable: true)]
     public ?array $raw = null;
@@ -157,6 +160,7 @@ class UsageRecord
         $usage->nodeKind = substr((string) ($record['node_kind'] ?? ''), 0, 32);
         $usage->isCompaction = (bool) ($record['is_compaction'] ?? false);
         $usage->raw = $record;
+        $usage->occurredMicros = (int) $occurredAt->format('u');
 
         return $usage;
     }

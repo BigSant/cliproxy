@@ -29,6 +29,11 @@ class TrafficIngester
     private const int MAX_PARSE_BYTES = 256 * 1_048_576;
     /** usage_record_id of an exchange that will not get one (a prewarm, a token count, a record that never came). */
     private const string NOT_LINKED = '0';
+    /** Held while request logs are taken in, re-read or moved: by the collector's traffic steps, reparse and retry. */
+    public const string LOCK = 'app-traffic';
+    /** MySQL errors of the server, not of the data: gone away, lost connection, too many connections, shutting
+     * down, disk or table full, storage engine error, lock wait, deadlock. */
+    private const array TRANSIENT_MYSQL_CODES = [1021, 1030, 1040, 1053, 1114, 1205, 1213, 2002, 2003, 2006, 2013];
     /** Attempts on one file before the quarantine: the process died on it this many times. */
     private const int MAX_ATTEMPTS = 2;
 
@@ -134,14 +139,24 @@ class TrafficIngester
     public function reparse(string $archivePath): array
     {
         $path = $this->archiveDirectory.'/'.$archivePath;
-        // A compressed file this large expands past what the collector parses at all (MAX_PARSE_BYTES).
-        if (is_file($path) && filesize($path) > self::MAX_PARSE_BYTES / 4) {
-            throw new \RuntimeException('Too large to read again: '.$archivePath);
-        }
-        $text = is_file($path) ? @gzdecode((string) file_get_contents($path)) : false;
-        if (false === $text) {
+        // Expanded in pieces and only up to what the collector parses at all: a well compressed log can be huge.
+        $in = is_file($path) ? @gzopen($path, 'rb') : false;
+        if (false === $in) {
             throw new \RuntimeException('Cannot read the archive copy '.$archivePath);
         }
+        $text = '';
+        while (!gzeof($in)) {
+            $chunk = gzread($in, 1_048_576);
+            if (false === $chunk) {
+                break;
+            }
+            $text .= $chunk;
+            if (\strlen($text) > self::MAX_PARSE_BYTES) {
+                gzclose($in);
+                throw new \RuntimeException('Too large to read again (over '.intdiv(self::MAX_PARSE_BYTES, 1_048_576).' MB expanded): '.$archivePath);
+            }
+        }
+        gzclose($in);
         $name = basename($archivePath, '.gz');
         $exchanges = $this->record($name, RequestLog::parse($text), (int) filemtime($path), $archivePath);
         $this->doctrine->getManager()->clear();
@@ -176,12 +191,21 @@ class TrafficIngester
             if (is_dir($copy)) {
                 continue;
             }
-            mkdir($copy, 0o750);
+            // Copied under a temporary name and renamed when whole: a copy cut short is copied over again (copy()
+            // overwrites), never taken as done.
+            $final = $copy;
+            $copy .= '.partial';
+            if (!is_dir($copy) && !@mkdir($copy, 0o750) && !is_dir($copy)) {
+                throw new ArchiveException('Cannot create '.$copy);
+            }
             foreach (new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($directory, \FilesystemIterator::SKIP_DOTS), \RecursiveIteratorIterator::SELF_FIRST) as $item) {
                 $destination = $copy.'/'.substr($item->getPathname(), \strlen($directory) + 1);
                 if ($item->isDir() ? !@mkdir($destination, 0o750) && !is_dir($destination) : !copy($item->getPathname(), $destination)) {
                     throw new ArchiveException('Cannot copy '.$item->getPathname().' to '.$copy);
                 }
+            }
+            if (!rename($copy, $final)) {
+                throw new ArchiveException('Cannot finish the copy '.$final);
             }
             ++$moved;
         }
@@ -318,10 +342,12 @@ class TrafficIngester
             if ($cause instanceof \Doctrine\DBAL\Exception\UniqueConstraintViolationException) {
                 return false;
             }
-            // The connection gone, a deadlock or lock wait, a disk problem: worth the next pass. Any other database
-            // error (a value too long, …) is the file's: quarantine, or it would block the log for good.
+            // The connection gone, the server restarting or out of room, a deadlock or lock wait, a disk problem: worth
+            // the next pass. Any other database error (a value too long, …) is the file's: quarantine, or it would
+            // block the log for good.
             if ($cause instanceof \Doctrine\DBAL\Exception\ConnectionException || $cause instanceof \Doctrine\DBAL\Exception\RetryableException
-                || $cause instanceof ArchiveException) {
+                || $cause instanceof ArchiveException
+                || ($cause instanceof \Doctrine\DBAL\Exception\DriverException && \in_array($cause->getCode(), self::TRANSIENT_MYSQL_CODES, true))) {
                 return true;
             }
         }
@@ -502,13 +528,14 @@ class TrafficIngester
         foreach ($this->exchanges->withoutAccount($this->clock->now()->modify('-1 day')) as $exchange) {
             $websocket = str_ends_with($exchange->endpoint, '(ws)');
             // A prewarm or a token count has no usage record of its own: never linked, never in the queue again.
-            $usage = Turn::KIND_SIDE === $exchange->kind && ($websocket || str_contains($exchange->endpoint, 'count_tokens')) ? null
+            $neverLinked = Turn::KIND_SIDE === $exchange->kind && ($websocket || str_contains($exchange->endpoint, 'count_tokens'));
+            $usage = $neverLinked ? null
                 : ($websocket
-                    ? $this->usage->forWebsocketTurn($exchange->requestTail, $exchange->sessionId, $exchange->occurredAt)
+                    ? $this->usage->forWebsocketTurn($exchange->requestTail, $exchange->sessionId, $exchange->occurredAt, $this->nextTurnAt($exchange))
                     : $this->usage->forRequest($exchange->requestTail, $exchange->occurredAt));
             if (null === $usage) {
                 // Three hours without a record: it is not coming (usage off then, a record lost upstream).
-                if (Turn::KIND_SIDE === $exchange->kind || $exchange->occurredAt < $giveUp) {
+                if ($neverLinked || $exchange->occurredAt < $giveUp) {
                     $exchange->usageRecordId = self::NOT_LINKED;
                     $entityManager->flush();
                 }
@@ -520,6 +547,16 @@ class TrafficIngester
             $entityManager->flush();
         }
         $entityManager->clear();
+    }
+
+    /** When the same WebSocket connection's next turn started: this turn's record was written before it. */
+    private function nextTurnAt(Exchange $exchange): ?\DateTimeImmutable
+    {
+        if (!preg_match('/^(.*)#(\d+)$/', $exchange->logFile, $match)) {
+            return null;
+        }
+
+        return $this->exchanges->findOneBy(['logFile' => $match[1].'#'.((int) $match[2] + 1)])?->occurredAt;
     }
 
     /** What the usage record adds to an exchange: account, session, kind, CLIProxyAPI's duration, tokens if none. */
@@ -563,26 +600,24 @@ class TrafficIngester
     }
 
     /**
-     * The compressed copy, written to a temporary file, checked and renamed into place: a full disk or a crash never
-     * leaves a half file under the final name. Taking the same file again writes the same name.
+     * The compressed copy: written to a temporary file, synced, read back and compared with the original (length and
+     * hash) before it is renamed into place. A full disk or a crash never leaves a short copy under the final name, and
+     * the original is removed only after this. Taking the same file again writes the same name.
      */
     private function archive(string $name, string $text, \DateTimeImmutable $at): string
     {
-        $relative = $at->format('Y-m-d').'/'.$name.'.gz';
-        $path = $this->archiveDirectory.'/'.$relative;
-        if (!is_dir(\dirname($path)) && !@mkdir(\dirname($path), 0o750, true) && !is_dir(\dirname($path))) {
-            throw new ArchiveException('Cannot create the archive directory '.\dirname($path));
-        }
+        [$relative, $path, $temporary] = $this->archivePaths($name, $at);
         $compressed = gzencode($text, 6);
-        $temporary = $path.'.tmp';
-        if (false === $compressed || \strlen($compressed) !== @file_put_contents($temporary, $compressed)) {
+        $handle = @fopen($temporary, 'wb');
+        if (false === $compressed || false === $handle || \strlen($compressed) !== fwrite($handle, $compressed) || !fflush($handle) || !fsync($handle)) {
+            if (false !== $handle) {
+                fclose($handle);
+            }
             @unlink($temporary);
             throw new ArchiveException('Cannot write the archive copy '.$temporary);
         }
-        chmod($temporary, 0o600);
-        if (!rename($temporary, $path)) {
-            throw new ArchiveException('Cannot move the archive copy into place: '.$path);
-        }
+        fclose($handle);
+        $this->verifyAndPlace($temporary, $path, \strlen($text), sha1($text));
 
         return $relative;
     }
@@ -590,17 +625,13 @@ class TrafficIngester
     /** The same, read and compressed in pieces: for files too large to hold in memory. */
     private function archiveStream(string $name, string $source, \DateTimeImmutable $at): string
     {
-        $relative = $at->format('Y-m-d').'/'.$name.'.gz';
-        $path = $this->archiveDirectory.'/'.$relative;
-        if (!is_dir(\dirname($path)) && !@mkdir(\dirname($path), 0o750, true) && !is_dir(\dirname($path))) {
-            throw new ArchiveException('Cannot create the archive directory '.\dirname($path));
-        }
-        $temporary = $path.'.tmp';
+        [$relative, $path, $temporary] = $this->archivePaths($name, $at);
         $in = fopen($source, 'rb');
         $out = gzopen($temporary, 'wb6');
         if (false === $in || false === $out) {
             throw new ArchiveException('Cannot stream '.$name.' into the archive');
         }
+        $hash = hash_init('sha1');
         $written = 0;
         while (!feof($in)) {
             $chunk = fread($in, 1_048_576);
@@ -611,19 +642,64 @@ class TrafficIngester
                 @unlink($temporary);
                 throw new ArchiveException('Cannot write the archive copy '.$temporary);
             }
+            hash_update($hash, $chunk);
             $written += \strlen($chunk);
         }
         fclose($in);
-        if (!gzclose($out) || $written !== filesize($source)) {
+        // gzclose() says true even when its last write failed: the read-back below is what tells.
+        gzclose($out);
+        $this->sync($temporary);
+        $this->verifyAndPlace($temporary, $path, $written, hash_final($hash));
+
+        return $relative;
+    }
+
+    /** @return array{0: string, 1: string, 2: string} relative path, final path, temporary path */
+    private function archivePaths(string $name, \DateTimeImmutable $at): array
+    {
+        $relative = $at->format('Y-m-d').'/'.$name.'.gz';
+        $path = $this->archiveDirectory.'/'.$relative;
+        if (!is_dir(\dirname($path)) && !@mkdir(\dirname($path), 0o750, true) && !is_dir(\dirname($path))) {
+            throw new ArchiveException('Cannot create the archive directory '.\dirname($path));
+        }
+
+        return [$relative, $path, $path.'.tmp'];
+    }
+
+    /** Reads the compressed copy back whole; only an identical one takes the final name. */
+    private function verifyAndPlace(string $temporary, string $path, int $length, string $sha1): void
+    {
+        $in = @gzopen($temporary, 'rb');
+        $hash = hash_init('sha1');
+        $read = 0;
+        while (false !== $in && !gzeof($in)) {
+            $chunk = gzread($in, 1_048_576);
+            if (false === $chunk) {
+                break;
+            }
+            hash_update($hash, $chunk);
+            $read += \strlen($chunk);
+        }
+        if (false !== $in) {
+            gzclose($in);
+        }
+        if (false === $in || $read !== $length || !hash_equals($sha1, hash_final($hash))) {
             @unlink($temporary);
-            throw new ArchiveException('The archive copy of '.$name.' is incomplete');
+            throw new ArchiveException(\sprintf('The archive copy %s does not read back whole (%d of %d bytes)', basename($path), $read, $length));
         }
         chmod($temporary, 0o600);
         if (!rename($temporary, $path)) {
             throw new ArchiveException('Cannot move the archive copy into place: '.$path);
         }
+    }
 
-        return $relative;
+    private function sync(string $path): void
+    {
+        $handle = @fopen($path, 'rb');
+        if (false === $handle || !fsync($handle)) {
+            throw new ArchiveException('Cannot sync '.$path);
+        }
+        fclose($handle);
     }
 
     private static function errorText(string $body): string

@@ -19,6 +19,24 @@ class ConfigBaselineTest extends TestCase
         );
     }
 
+    public function testThePolicyValuesMustBeWrittenOut(): void
+    {
+        $policy = ['access' => ['api-keys' => ['k']], 'observability' => [
+            'usage' => ['usage-statistics-enabled' => true],
+            'logs' => ['request-log' => true, 'logs-max-total-size-mb' => 0, 'error-logs-max-files' => 0],
+        ]];
+        self::assertSame([], ConfigBaseline::policyViolations($policy, true));
+
+        // Left out, CLIProxyAPI's defaults would apply.
+        self::assertCount(3, ConfigBaseline::policyViolations(['access' => ['api-keys' => ['k']]], true));
+        self::assertCount(2, ConfigBaseline::policyViolations(['access' => ['api-keys' => ['k']]], false));
+        $blankKeys = $policy;
+        $blankKeys['access']['api-keys'] = ['', '  '];
+        self::assertCount(1, ConfigBaseline::policyViolations($blankKeys, true));
+        unset($blankKeys['access']);
+        self::assertCount(1, ConfigBaseline::policyViolations($blankKeys, true));
+    }
+
     public function testClientKeysAreHiddenInTheEditorAndComeBackOnSave(): void
     {
         $yaml = "access:\n  api-keys: [\"secret-one\", \"secret-two\"]\n";
