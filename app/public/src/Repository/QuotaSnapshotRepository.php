@@ -37,6 +37,36 @@ class QuotaSnapshotRepository extends ServiceEntityRepository
         return $latest;
     }
 
+    /**
+     * Every snapshot since a time, by account, oldest first; with the last one before it, so each account's value at
+     * the start is known.
+     *
+     * @param list<string> $authIndexes
+     *
+     * @return array<string, list<QuotaSnapshot>>
+     */
+    public function history(array $authIndexes, \DateTimeImmutable $since): array
+    {
+        if ([] === $authIndexes) {
+            return [];
+        }
+        $history = array_fill_keys($authIndexes, []);
+        $rows = $this->createQueryBuilder('s')
+            ->where('s.authIndex IN (:accounts)')
+            ->andWhere('s.fetchedAt >= :since')
+            ->setParameter('accounts', $authIndexes)
+            ->setParameter('since', $since->modify('-1 day'), 'utc_datetime_immutable')
+            ->orderBy('s.fetchedAt', 'ASC')
+            ->addOrderBy('s.id', 'ASC')
+            ->getQuery()
+            ->getResult();
+        foreach ($rows as $snapshot) {
+            $history[$snapshot->authIndex][] = $snapshot;
+        }
+
+        return $history;
+    }
+
     public function deleteOlderThan(\DateTimeImmutable $before): int
     {
         return $this->createQueryBuilder('s')

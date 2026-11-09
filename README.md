@@ -36,12 +36,19 @@ Symfony 8.1 skydelis.
 
 ## Skydelis
 
+Tamsi tema (šviesi – mygtukas viršuje), šoninė navigacija; el. paštai paslėpti, kol nepaspaudi „akies“ (patogu
+dalintis ekranu). Išdėstymas – pagal Theo gist'o kvotų puslapį.
+
 | Puslapis | Kas |
 | --- | --- |
+| Kvotos | Kiekvieno tiekėjo paskyros kaip vienas pool'as (kiekviena paskyra – 100 %): likutis „X % iš N×100 %“, grafikas „užfiksuota“ (iš limitų istorijos) ir „prognozė“ (punktyras) per dvi savaites su atsinaujinimų šuoliais (+X %), „Dabar“ linija; „Pool ištuštės“, „Pirma ištuštės“, „Kitas atsinaujinimas“, „Burn“ per 1/3/6 val. Rodiniai: likutis, sąnaudos (%/val.), paskyros atskirai; langai 7 d., 5 val., 7 d. Fable; savaitės perjungimas. |
 | Apžvalga | Paskyros su 5 val., 7 d. ir 7 d. Fable limitais (kiek panaudota, po kiek atsinaujina), 24 val. užklausos, tokenai, cache skaitymai/rašymai, session affinity, gyvas užklausų srautas (kas 5 s). |
 | Paskyros | Prijungti Claude / Codex paskyrą, įjungti/išjungti, prioritetas, svoris, Codex WebSocket'ai, pastaba, rakto atnaujinimas, patikra, pašalinimas. |
 | Naudojimas | 24 val. – 90 d.: per dieną, pagal paskyrą ir modelį; cache santykis; sesijos, peršokusios į kitą paskyrą. |
 | Nustatymai | Strategija, session affinity, pakartojimai; soonest-reset-first; klientų raktai; visas `config.yaml`. |
+| Žurnalas | Kiekviena užklausa: įvestis (žmogaus prompt'as ar įrankių rezultatai), mąstymas, atsakymas, įrankių kvietimai su rezultatu (pavyko / klaida), tokenai, trukmė, HTTP būsena. Filtrai, paieška, žalio log'o atsisiuntimas, JSONL eksportas. |
+| Sesijos | Sesijų sąrašas ir kiekvienos laiko juosta: prompt'ai, mąstymas, atsakymai, įrankiai. |
+| Analizė | Įrankių klaidų dalis, kaip baigėsi atsakymai, užklausų skaičius vienam prompt'ui, mąstymo dalis, naujausios įrankių klaidos. |
 | Prijungimas | Paruošti `~/.claude/settings.json` ir `~/.codex/config.toml` fragmentai su hub'o adresu ir raktu. |
 
 Prisijungimas – vartotojas `admin`, slaptažodis `ADMIN_PASSWORD`.
@@ -65,6 +72,33 @@ per CLIProxyAPI `/requests/api-call` su paskyros raktu klausia tiekėjo:
 
 Nepavykus – paskutinio proxy atsakymo `anthropic-ratelimit-unified-*` / `x-codex-*` antraštės (žymima „iš
 antraščių“). Nuotraukos laikomos 30 d.
+
+### Kvotų prognozė
+
+`src/Quota/PoolForecast.php`. Burn – kiek per pasirinktą langą (1/3/6 val.) paaugo visų paskyrų panaudota dalis
+(atsinaujinimų kritimai neskaičiuojami), %/val. Prognozė tą tempą leidžia iš paskyros, kuri atsinaujina anksčiausiai
+(kaip soonest-reset-first), o atsinaujinimo metu paskyrai grąžina visą langą ir nustato kitą atsinaujinimą po
+lango ilgio (7 d. arba 5 val.). „Pool ištuštės“ – kada visų likutis pasiektų 0, „Pirma ištuštės“ – kuri paskyra
+pirmoji.
+
+### Srauto žurnalas
+
+CLIProxyAPI `observability.logs.request-log: true` kiekvienai užklausai rašo failą
+`data/<env>/cliproxy-traffic/logs/` (užklausa, upstream užklausos ir atsakymai, atsakymas klientui; slapti
+header'iai užmaskuoti). Kolektorius (`src/Traffic/`) kas 5 s paima baigtus failus (senesnius nei 5 s):
+
+- `/v1/messages` (Claude Code) – paskutinė user žinutė (prompt'as ar `tool_result`), SSE atsakymas sudedamas
+  atgal: `thinking`, `text`, `tool_use` (su `input_json_delta`), `stop_reason`, `usage`;
+- `/v1/responses` (Codex) – įvestis po paskutinio modelio išvesties elemento (`function_call_output` ir pan.),
+  `response.completed`: `reasoning` santrauka, `message`, `function_call`, `usage`;
+- įrankio rezultatas ateina **kitoje** užklausoje: Claude – `tool_result.is_error`, Codex – komandos `exit_code`
+  (nėra – „neaišku“); jis pažymimas prie to kvietimo (`tool_call`);
+- paskyra ir sesija – iš usage įrašo su ta pačia request id pabaiga (failo vardo paskutiniai 8 simboliai).
+
+Lentelės `exchange` ir `tool_call` laikomos 90 d., ilgi tekstai trumpinami (prompt'as 64 KB, mąstymas ir atsakymas
+256 KB). Žalias failas suspaudžiamas į `cliproxy-traffic/archive/<diena>/` (numatyta 14 d., Nustatymai) ir iš
+`logs/` ištrinamas. Skydelis archyvą tik skaito; `auth/` su paskyrų raktais nei php-fpm, nei cron nemato.
+Žurnale – visas kodas ir pokalbiai: jie lieka tik šiame kompiuteryje.
 
 ### Soonest-reset-first
 

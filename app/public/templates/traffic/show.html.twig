@@ -1,0 +1,93 @@
+{% extends 'base.html.twig' %}
+{% import '_parts/icons.html.twig' as ui %}
+
+{% block title %}Užklausa #{{ exchange.id }}{% endblock %}
+
+{% block body %}
+    <div class="page-head">
+        <div class="title-line">
+            <h1><span class="provider provider-{{ exchange.provider }}">{{ exchange.model ?: exchange.endpoint }}</span></h1>
+            {% include 'traffic/_status.html.twig' %}
+            <span class="muted">{{ exchange.occurredAt|date('Y-m-d H:i:s') }}</span>
+        </div>
+        <div class="head-actions">
+            {% if exchange.sessionId %}
+                {% if previous %}<a class="button" href="{{ path('app_traffic_show', {id: previous.id}) }}">← Ankstesnė</a>{% endif %}
+                <a class="button" href="{{ path('app_traffic_session', {sessionId: exchange.sessionId}) }}">Sesija {{ position }}/{{ sessionLength }}</a>
+                {% if next %}<a class="button" href="{{ path('app_traffic_show', {id: next.id}) }}">Kita →</a>{% endif %}
+            {% endif %}
+            {% if exchange.archivePath %}<a class="button" href="{{ path('app_traffic_raw', {id: exchange.id}) }}">{{ ui.icon('download') }} Žalias log'as</a>{% endif %}
+        </div>
+    </div>
+
+    <section class="stats compact">
+        <div class="stat"><div class="stat-label">Įvestis / išvestis</div><div class="stat-value">{{ exchange.inputTokens|tokens }} / {{ exchange.outputTokens|tokens }}</div><div class="stat-sub">mąstymo {{ exchange.reasoningTokens|tokens }}</div></div>
+        <div class="stat"><div class="stat-label">Cache skait. / raš.</div><div class="stat-value">{{ exchange.cacheReadTokens|tokens }} / {{ exchange.cacheCreationTokens|tokens }}</div><div class="stat-sub">{{ exchange.messageCount }} žinutės istorijoje</div></div>
+        <div class="stat"><div class="stat-label">Trukmė</div><div class="stat-value">{{ (exchange.durationMs / 1000)|number_format(1, ',') }} s</div><div class="stat-sub">{{ exchange.stream ? 'stream' : 'vienu atsakymu' }} · {{ exchange.client ?: '–' }}</div></div>
+        <div class="stat"><div class="stat-label">Paskyra</div><div class="stat-value small-value email">{{ exchange.account ?: '–' }}</div><div class="stat-sub">{{ exchange.endpoint }} · HTTP {{ exchange.statusCode ?: '–' }}</div></div>
+    </section>
+
+    {% if exchange.error %}
+        <div class="flash flash-error"><strong>Klaida:</strong> {{ exchange.error }}</div>
+    {% endif %}
+
+    <section class="card">
+        <h2>Įvestis <span class="muted small">{{ {user: 'žmogaus prompt\'as', tool_results: 'įrankių rezultatai', none: 'nėra'}[exchange.promptKind] ?? exchange.promptKind }}</span></h2>
+        {% if exchange.prompt %}<pre class="text-block">{{ exchange.prompt }}</pre>{% endif %}
+        {% if exchange.toolErrorCount %}<p class="bad small">{{ exchange.toolErrorCount }} įrankių rezultatai šioje užklausoje praneša klaidą.</p>{% endif %}
+        {% if not exchange.prompt and not exchange.toolErrorCount %}<p class="muted">Nauja įvestis – tik ankstesnių įrankių rezultatai{{ exchange.promptKind == 'none' ? ' arba nieko' : '' }}.</p>{% endif %}
+    </section>
+
+    {% if exchange.thinking %}
+        <section class="card">
+            <details open>
+                <summary><h2>Mąstymas <span class="muted small">{{ exchange.thinking|length|tokens }} simb.</span></h2></summary>
+                <pre class="text-block thinking">{{ exchange.thinking }}</pre>
+            </details>
+        </section>
+    {% endif %}
+
+    {% if exchange.answer %}
+        <section class="card">
+            <h2>Atsakymas</h2>
+            <pre class="text-block">{{ exchange.answer }}</pre>
+        </section>
+    {% endif %}
+
+    {% if exchange.toolCalls is not empty %}
+        <section class="card">
+            <h2>Įrankių kvietimai <span class="muted small">{{ exchange.toolCalls|length }}</span></h2>
+            {% for call in exchange.toolCalls %}
+                <details class="tool-call">
+                    <summary>
+                        <code>{{ call.name }}</code>
+                        {% if not call.answered %}<span class="tag">laukia rezultato</span>
+                        {% elseif call.isError is same as(true) %}<span class="tag tag-bad">klaida</span>
+                        {% elseif call.isError is same as(false) %}<span class="tag tag-ok">pavyko</span>
+                        {% else %}<span class="tag">neaišku</span>{% endif %}
+                        <span class="muted small">{{ call.input|u.truncate(120, '…') }}</span>
+                    </summary>
+                    <div class="tool-body">
+                        <div class="muted small">Įvestis</div>
+                        <pre class="text-block">{{ call.input }}</pre>
+                        {% if call.answered %}
+                            <div class="muted small">Rezultatas ({{ call.answeredAt ? call.answeredAt|date('H:i:s') : '' }})</div>
+                            <pre class="text-block {{ call.isError ? 'is-error' }}">{{ call.output ?: '(tuščias)' }}</pre>
+                        {% endif %}
+                    </div>
+                </details>
+            {% endfor %}
+        </section>
+    {% endif %}
+
+    <section class="card">
+        <h2>Užklausos duomenys</h2>
+        <dl class="facts">
+            <dt>Sesija</dt><dd>{% if exchange.sessionId %}<a href="{{ path('app_traffic_session', {sessionId: exchange.sessionId}) }}"><code>{{ exchange.sessionId }}</code></a>{% else %}–{% endif %}</dd>
+            <dt>Pabaiga</dt><dd>{{ exchange.stopReason ?: '–' }}</dd>
+            <dt>Sistema / įrankiai</dt><dd>{{ exchange.systemChars|tokens }} simb. sistemos instrukcijų · {{ exchange.toolsDeclared }} deklaruoti įrankiai</dd>
+            <dt>Dydis</dt><dd>užklausa {{ exchange.requestBytes|tokens }} B · atsakymas {{ exchange.responseBytes|tokens }} B</dd>
+            <dt>Log failas</dt><dd><code>{{ exchange.logFile }}</code>{% if not exchange.archivePath %} <span class="muted">(archyve nebėra)</span>{% endif %}</dd>
+        </dl>
+    </section>
+{% endblock %}

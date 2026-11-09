@@ -37,6 +37,19 @@
     </div>
 
     <section class="card">
+        <h2>Srauto žurnalas</h2>
+        <p class="muted">Kiekviena užklausa ir atsakymas (prompt'as, mąstymas, atsakymas, įrankių kvietimai ir jų rezultatai, tokenai, būsena)
+            patenka į <a href="{{ path('app_traffic') }}">Žurnalą</a> ir laikomi 90 d.; žalias CLIProxyAPI log'as – suspaustas archyve.
+            Juose – visas tavo kodas ir pokalbiai: jie lieka tik šiame kompiuteryje.</p>
+        <form method="post" action="{{ path('app_settings_traffic') }}" class="stack">
+            <input type="hidden" name="_token" value="{{ csrf_token('settings') }}">
+            <label class="check"><input type="checkbox" name="request_log" value="1" {{ requestLog ? 'checked' }}> Registruoti visą srautą (CLIProxyAPI <code>request-log</code>)</label>
+            <label>Žalius log'us archyve laikyti (d.) <input type="number" name="archive_days" value="{{ archiveDays }}" min="1" max="90"></label>
+            <button class="button primary">Išsaugoti</button>
+        </form>
+    </section>
+
+    <section class="card">
         <div class="card-head">
             <div>
                 <h2>Klientų raktai</h2>

@@ -1,0 +1,38 @@
+{# A TimeChart (src/Chart/TimeChart.php) as SVG; app.js adds the hover read-out from data-points. #}
+<div class="chart-box" data-time-chart data-points="{{ chart.points|json_encode }}" data-from="{{ chart.from }}" data-to="{{ chart.to }}" data-left="{{ chart.left }}" data-right="{{ chart.right }}" data-unit="{{ chart.unit }}">
+    <svg viewBox="0 0 {{ constant('App\\Chart\\TimeChart::WIDTH') }} {{ constant('App\\Chart\\TimeChart::HEIGHT') }}" class="time-chart" role="img" aria-label="{{ label|default('Grafikas') }}">
+        <defs>
+            {% for series in chart.series %}
+                {% if series.area %}
+                    <linearGradient id="fill-{{ id }}-{{ loop.index }}" x1="0" x2="0" y1="0" y2="1">
+                        <stop offset="0%" stop-color="{{ series.color }}" stop-opacity="{{ series.dashed ? '0.10' : '0.28' }}"/>
+                        <stop offset="100%" stop-color="{{ series.color }}" stop-opacity="0"/>
+                    </linearGradient>
+                {% endif %}
+            {% endfor %}
+        </defs>
+        {% for tick in chart.valueTicks %}
+            <line x1="{{ chart.left }}" x2="{{ chart.right }}" y1="{{ tick.y }}" y2="{{ tick.y }}" class="grid"/>
+            <text x="{{ chart.left - 8 }}" y="{{ tick.y + 4 }}" class="axis" text-anchor="end">{{ tick.label }}</text>
+        {% endfor %}
+        {% for tick in chart.dayTicks %}
+            <line x1="{{ tick.x }}" x2="{{ tick.x }}" y1="{{ chart.y(chart.max) }}" y2="{{ chart.bottom }}" class="grid grid-day"/>
+            {% if tick.x + 30 < chart.right %}<text x="{{ tick.x + 30 }}" y="{{ chart.bottom + 20 }}" class="axis" text-anchor="middle">{{ tick.label }}</text>{% endif %}
+        {% endfor %}
+        {% for series in chart.series %}
+            {% if series.area %}<path d="{{ series.area }}" fill="url(#fill-{{ id }}-{{ loop.index }})" stroke="none"/>{% endif %}
+            <path d="{{ series.d }}" fill="none" stroke="{{ series.color }}" stroke-width="2.2" stroke-linejoin="round" {% if series.dashed %}stroke-dasharray="7 6"{% endif %}><title>{{ series.label }}</title></path>
+        {% endfor %}
+        {% if chart.nowX is not null %}
+            <line x1="{{ chart.nowX }}" x2="{{ chart.nowX }}" y1="{{ chart.y(chart.max) - 12 }}" y2="{{ chart.bottom }}" class="now-line"/>
+            <text x="{{ chart.nowX }}" y="{{ chart.y(chart.max) - 16 }}" class="axis now-label" text-anchor="middle">Dabar</text>
+        {% endif %}
+        {% for marker in chart.markers %}
+            <text x="{{ marker.x }}" y="{{ max(chart.y(chart.max) + 2, marker.y - 10) }}" class="marker" text-anchor="middle">{{ marker.text }}</text>
+        {% endfor %}
+        <g class="hover" visibility="hidden">
+            <line class="hover-line" y1="{{ chart.y(chart.max) }}" y2="{{ chart.bottom }}"/>
+        </g>
+    </svg>
+    <div class="chart-tip" hidden></div>
+</div>

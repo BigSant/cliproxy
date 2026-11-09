@@ -2,7 +2,7 @@
 <div class="account-cell">
     <span class="provider provider-{{ account.provider }}">{{ account.provider == 'claude' ? 'Claude' : (account.provider == 'codex' ? 'Codex' : account.provider) }}</span>
     <div>
-        <div class="account-name">{{ account.label }}</div>
+        <div class="account-name email">{{ account.label }}</div>
         <div class="account-meta">
             {% if account.disabled %}<span class="tag tag-off">išjungta</span>
             {% elseif account.requiresSignIn %}<span class="tag tag-bad">reikia prisijungti</span>

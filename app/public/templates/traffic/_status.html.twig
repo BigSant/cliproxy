@@ -1,0 +1,10 @@
+{# The outcome of one exchange as a tag. #}
+{% if exchange.failed %}
+    <span class="tag tag-bad" title="{{ exchange.error }}">HTTP {{ exchange.statusCode ?: '–' }}</span>
+{% elseif exchange.stopReason in ['tool_use'] or exchange.toolCallCount > 0 %}
+    <span class="tag tag-info">įrankiai</span>
+{% elseif exchange.stopReason in ['max_tokens', 'incomplete: max_output_tokens'] %}
+    <span class="tag tag-warn">nukirsta</span>
+{% else %}
+    <span class="tag tag-ok">{{ exchange.stopReason ?: 'ok' }}</span>
+{% endif %}

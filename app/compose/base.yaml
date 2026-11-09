@@ -22,6 +22,8 @@ services:
     volumes:
       - ${PROJECT_DOCKER_DIRECTORY}/config/cliproxy/:/opt/cliproxy/:ro
       - ${PROJECT_DATA_DIRECTORY}/cliproxy/:/CLIProxyAPI/state/
+      # Its working directory: CLIProxyAPI writes logs/ (main.log and the request logs) there.
+      - ${PROJECT_DATA_DIRECTORY}/cliproxy-traffic/:/CLIProxyAPI/traffic/
     networks:
       - network_app
     logging:
@@ -36,9 +38,23 @@ services:
       timeout: 3s
       retries: 5
       start_period: 20s
+  # The request logs CLIProxyAPI writes (one file per request, cliproxy-traffic/logs/) go to the collector, which takes
+  # them into the database and keeps them compressed in cliproxy-traffic/archive/ (README, "Srauto žurnalas"); the
+  # dashboard only reads the archive. Neither sees the state directory with the accounts' tokens.
   php-fpm:
     environment:
       CLIPROXY_MANAGEMENT_URL: http://cliproxy:8317
+      CLIPROXY_LOG_DIR: /var/lib/cliproxy/logs
+      TRAFFIC_ARCHIVE_DIR: /var/lib/cliproxy/archive
+    volumes:
+      - ${PROJECT_DATA_DIRECTORY}/cliproxy-traffic/:/var/lib/cliproxy/:ro
   cron:
+    depends_on:
+      cliproxy:
+        condition: service_healthy
     environment:
       CLIPROXY_MANAGEMENT_URL: http://cliproxy:8317
+      CLIPROXY_LOG_DIR: /var/lib/cliproxy/logs
+      TRAFFIC_ARCHIVE_DIR: /var/lib/cliproxy/archive
+    volumes:
+      - ${PROJECT_DATA_DIRECTORY}/cliproxy-traffic/:/var/lib/cliproxy/

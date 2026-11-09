@@ -14,6 +14,7 @@ use Doctrine\ORM\Mapping as ORM;
 #[ORM\Index(name: 'usage_occurred', columns: ['occurred_at'])]
 #[ORM\Index(name: 'usage_account', columns: ['auth_index', 'occurred_at'])]
 #[ORM\Index(name: 'usage_session', columns: ['session_id'])]
+#[ORM\Index(name: 'usage_request', columns: ['request_tail'])]
 class UsageRecord
 {
     #[ORM\Id]
@@ -58,6 +59,9 @@ class UsageRecord
         public readonly bool $failed,
         #[ORM\Column]
         public readonly int $statusCode,
+        /** The last eight characters of the request id, which the request log's file name ends with too. */
+        #[ORM\Column(length: 8, options: ['default' => ''])]
+        public readonly string $requestTail = '',
     ) {
     }
 
@@ -101,6 +105,7 @@ class UsageRecord
             latencyMs: (int) ($record['latency_ms'] ?? 0),
             failed: (bool) ($record['failed'] ?? false),
             statusCode: (int) ($fail['status_code'] ?? 0),
+            requestTail: substr(trim((string) ($record['request_id'] ?? '')), -8),
         );
     }
 }

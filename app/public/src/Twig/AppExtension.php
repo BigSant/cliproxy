@@ -47,14 +47,35 @@ class AppExtension
 
     /** How long until an instant: "po 2 d. 4 val.", "po 35 min." */
     #[AsTwigFilter('until')]
-    public function until(?\DateTimeInterface $instant): string
+    public function until(\DateTimeInterface|int|null $instant): string
     {
+        $instant = \is_int($instant) ? new \DateTimeImmutable('@'.$instant) : $instant;
         if (null === $instant) {
             return '–';
         }
         $seconds = $instant->getTimestamp() - $this->clock->now()->getTimestamp();
 
         return $seconds <= 0 ? 'dabar' : 'po '.self::span($seconds);
+    }
+
+    /** A moment in the coming or past days: "Pr 14:30", or "rytoj 09:00", "šiandien 18:00". */
+    #[AsTwigFilter('when')]
+    public function when(\DateTimeInterface|int|null $instant): string
+    {
+        if (null === $instant) {
+            return '–';
+        }
+        $zone = new \DateTimeZone(date_default_timezone_get());
+        $at = (\is_int($instant) ? new \DateTimeImmutable('@'.$instant) : \DateTimeImmutable::createFromInterface($instant))->setTimezone($zone);
+        $today = $this->clock->now()->setTimezone($zone)->setTime(0, 0);
+        $days = (int) floor(($at->setTime(0, 0)->getTimestamp() - $today->getTimestamp()) / 86400 + 0.5);
+
+        return match (true) {
+            0 === $days => 'šiandien',
+            1 === $days => 'rytoj',
+            $days > 1 && $days < 7 => ['Sk', 'Pr', 'An', 'Tr', 'Kt', 'Pn', 'Št'][(int) $at->format('w')],
+            default => $at->format('m-d'),
+        }.' '.$at->format('H:i');
     }
 
     /** How long ago: "prieš 3 min." */

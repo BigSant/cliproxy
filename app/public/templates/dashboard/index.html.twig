@@ -82,7 +82,7 @@
                     {% for record in recent %}
                         <tr class="{{ record.failed ? 'is-failed' }}">
                             <td>{{ record.occurredAt|date('H:i:s') }}</td>
-                            <td>{{ record.account }}</td>
+                            <td><span class="email">{{ record.account }}</span></td>
                             <td><span class="provider provider-{{ record.provider }}">{{ record.model }}</span></td>
                             <td class="num">{{ record.inputTokens|tokens }}</td>
                             <td class="num">{{ record.outputTokens|tokens }}</td>

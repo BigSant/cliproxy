@@ -7,12 +7,20 @@
       "file": "table-doctrine_migration_versions.sql"
     },
     {
+      "name": "exchange",
+      "file": "table-exchange.sql"
+    },
+    {
       "name": "quota_snapshot",
       "file": "table-quota_snapshot.sql"
     },
     {
       "name": "setting",
       "file": "table-setting.sql"
+    },
+    {
+      "name": "tool_call",
+      "file": "table-tool_call.sql"
     },
     {
       "name": "usage_record",

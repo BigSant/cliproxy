@@ -7,7 +7,7 @@
             <tbody>
                 {% for row in rows %}
                     <tr>
-                        <td><span class="provider provider-{{ row.provider }}">{{ row[label] ?: '–' }}</span></td>
+                        <td><span class="provider provider-{{ row.provider }}"><span class="{{ label == 'account' ? 'email' }}">{{ row[label] ?: '–' }}</span></span></td>
                         <td class="num">{{ row.requests|tokens }}{% if row.failed %} <span class="bad">/ {{ row.failed }}</span>{% endif %}</td>
                         <td class="num">{{ row.total|tokens }}</td>
                         <td class="num">{{ row.cache_read|tokens }}</td>

@@ -1,0 +1,74 @@
+{% extends 'base.html.twig' %}
+{% import '_parts/icons.html.twig' as ui %}
+
+{% block title %}Žurnalas{% endblock %}
+
+{% block body %}
+    <div class="page-head">
+        <div class="title-line">
+            <h1>Srauto žurnalas</h1>
+            <span class="muted">{{ total }} užklausų</span>
+        </div>
+        <div class="head-actions">
+            {% include 'traffic/_filters.html.twig' %}
+            <a class="button" href="{{ path('app_traffic_export', app.request.query.all) }}">{{ ui.icon('download') }} JSONL</a>
+        </div>
+    </div>
+
+    <form method="get" class="filter-bar">
+        <input type="hidden" name="range" value="{{ range }}">
+        <input type="search" name="q" value="{{ filters.q }}" placeholder="Ieškoti prompt'e, atsakyme, mąstyme, klaidoje…">
+        <select name="provider">
+            <option value="">Visi tiekėjai</option>
+            {% for key, label in {claude: 'Claude', codex: 'Codex', other: 'Kiti'} %}<option value="{{ key }}" {{ filters.provider == key ? 'selected' }}>{{ label }}</option>{% endfor %}
+        </select>
+        <select name="outcome">
+            <option value="">Visos užklausos</option>
+            {% for key, label in {prompt: 'Tik žmogaus prompt\'ai', failed: 'Nepavykusios', tool_error: 'Su įrankių klaidomis', thinking: 'Su mąstymu'} %}<option value="{{ key }}" {{ filters.outcome == key ? 'selected' }}>{{ label }}</option>{% endfor %}
+        </select>
+        <input type="text" name="model" value="{{ filters.model }}" placeholder="Modelis">
+        {% if filters.session %}<input type="hidden" name="session" value="{{ filters.session }}">{% endif %}
+        <button class="button primary">Filtruoti</button>
+        {% if filters|filter(v => v)|length %}<a class="button" href="{{ path('app_traffic', {range: range}) }}">Išvalyti</a>{% endif %}
+    </form>
+
+    <section class="card flush">
+        <div class="table-wrap">
+            <table class="traffic">
+                <thead>
+                    <tr><th>Laikas</th><th>Modelis / paskyra</th><th>Įvestis → atsakymas</th><th class="num">Įrankiai</th><th class="num">Tokenai</th><th class="num">Trukmė</th><th>Būsena</th></tr>
+                </thead>
+                <tbody>
+                    {% for exchange in exchanges %}
+                        <tr class="row-link {{ exchange.failed ? 'is-failed' }}" data-href="{{ path('app_traffic_show', {id: exchange.id}) }}">
+                            <td class="nowrap"><a href="{{ path('app_traffic_show', {id: exchange.id}) }}">{{ exchange.occurredAt|date('m-d H:i:s') }}</a></td>
+                            <td>
+                                <span class="provider provider-{{ exchange.provider }}">{{ exchange.model ?: exchange.endpoint }}</span>
+                                <div class="muted small email">{{ exchange.account ?: '–' }}</div>
+                            </td>
+                            <td class="excerpt">
+                                {% if exchange.promptKind == 'user' %}<span class="kind kind-user">žmogus</span> {{ exchange.prompt|u.truncate(140, '…') }}
+                                {% elseif exchange.promptKind == 'tool_results' %}<span class="kind">rezultatai{% if exchange.toolErrorCount %} · <span class="bad">{{ exchange.toolErrorCount }} klaid.</span>{% endif %}</span>
+                                {% else %}<span class="kind">–</span>{% endif %}
+                                <div class="muted small">{% if exchange.thinking %}<span class="kind kind-think">mąstė</span> {% endif %}{{ (exchange.answer ?: exchange.error)|u.truncate(140, '…') }}</div>
+                            </td>
+                            <td class="num">{{ exchange.toolCallCount ?: '' }}</td>
+                            <td class="num">{{ (exchange.inputTokens + exchange.outputTokens + exchange.cacheReadTokens + exchange.cacheCreationTokens)|tokens }}</td>
+                            <td class="num">{{ (exchange.durationMs / 1000)|number_format(1, ',') }} s</td>
+                            <td>{% include 'traffic/_status.html.twig' %}</td>
+                        </tr>
+                    {% else %}
+                        <tr><td colspan="7" class="muted empty">Užklausų nėra. Žurnalas pildosi, kai per hub'ą eina srautas (Nustatymai → Srauto žurnalas įjungtas).</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </section>
+    {% if pages > 1 %}
+        <nav class="pager">
+            {% if page > 1 %}<a class="button" href="{{ path('app_traffic', app.request.query.all|merge({page: page - 1})) }}">← Naujesni</a>{% endif %}
+            <span class="muted">{{ page }} / {{ pages }}</span>
+            {% if page < pages %}<a class="button" href="{{ path('app_traffic', app.request.query.all|merge({page: page + 1})) }}">Senesni →</a>{% endif %}
+        </nav>
+    {% endif %}
+{% endblock %}

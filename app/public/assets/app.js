@@ -54,6 +54,14 @@ if (live) {
         td.textContent = text;
         return td;
     };
+    const accountCell = (text) => {
+        const td = cell('');
+        const span = document.createElement('span');
+        span.className = 'email';
+        span.textContent = text;
+        td.append(span);
+        return td;
+    };
     let newest = body.querySelector('tr:not(.placeholder)') ? null : '';
     const refresh = async () => {
         if (document.hidden) {
@@ -86,7 +94,7 @@ if (live) {
                 modelCell.append(model);
                 row.append(
                     cell(new Date(record.at).toLocaleTimeString('lt-LT')),
-                    cell(record.account),
+                    accountCell(record.account),
                     modelCell,
                     cell(number(record.input), 'num'),
                     cell(number(record.output), 'num'),
@@ -104,4 +112,74 @@ if (live) {
         }
     };
     setInterval(refresh, 5000);
+}
+
+// Theme (dark by default) and hidden e-mails, remembered in this browser.
+const remember = (key, value) => { try { localStorage.setItem(key, value); } catch { /* private window */ } };
+document.querySelector('[data-toggle-theme]')?.addEventListener('click', () => {
+    const next = document.documentElement.dataset.theme === 'light' ? 'dark' : 'light';
+    document.documentElement.dataset.theme = next;
+    remember('theme', next);
+});
+document.querySelector('[data-toggle-emails]')?.addEventListener('click', () => {
+    remember('showEmails', document.documentElement.classList.toggle('show-emails') ? '1' : '0');
+});
+document.querySelector('[data-reload]')?.addEventListener('click', () => window.location.reload());
+document.querySelector('[data-toggle-sidebar]')?.addEventListener('click', () => document.getElementById('sidebar')?.classList.toggle('open'));
+
+// Whole table rows open their page (the first link stays the keyboard way).
+document.addEventListener('click', (event) => {
+    const row = event.target.closest('tr[data-href]');
+    if (row && !event.target.closest('a, button, form, input, select')) {
+        window.location.href = row.dataset.href;
+    }
+});
+
+// Time charts: the value nearest to the pointer, per series.
+for (const box of document.querySelectorAll('[data-time-chart]')) {
+    const svg = box.querySelector('svg');
+    const tip = box.querySelector('.chart-tip');
+    const hover = svg.querySelector('.hover');
+    const line = svg.querySelector('.hover-line');
+    const points = JSON.parse(box.dataset.points || '[]');
+    const from = Number(box.dataset.from);
+    const to = Number(box.dataset.to);
+    const left = Number(box.dataset.left);
+    const right = Number(box.dataset.right);
+    const width = svg.viewBox.baseVal.width;
+    const unit = box.dataset.unit;
+    const format = new Intl.DateTimeFormat('lt-LT', { weekday: 'short', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+    svg.addEventListener('mousemove', (event) => {
+        const rect = svg.getBoundingClientRect();
+        const x = (event.clientX - rect.left) / rect.width * width;
+        if (x < left || x > right || points.length === 0) {
+            hover.setAttribute('visibility', 'hidden');
+            tip.hidden = true;
+            return;
+        }
+        const t = from + (x - left) / (right - left) * (to - from);
+        const nearest = new Map();
+        for (const point of points) {
+            const best = nearest.get(point.s);
+            if (!best || Math.abs(point.t - t) < Math.abs(best.t - t)) {
+                nearest.set(point.s, point);
+            }
+        }
+        const shown = [...nearest.values()].filter((point) => Math.abs(point.t - t) < (to - from) / 60);
+        if (shown.length === 0) {
+            hover.setAttribute('visibility', 'hidden');
+            tip.hidden = true;
+            return;
+        }
+        line.setAttribute('x1', x);
+        line.setAttribute('x2', x);
+        hover.setAttribute('visibility', 'visible');
+        tip.hidden = false;
+        tip.style.left = `${(x / width) * 100}%`;
+        tip.textContent = `${format.format(new Date(shown[0].t * 1000))} · ` + shown.map((point) => `${shown.length > 1 ? point.s + ': ' : ''}${point.v.toLocaleString('lt-LT')}${unit}`).join(' · ');
+    });
+    svg.addEventListener('mouseleave', () => {
+        hover.setAttribute('visibility', 'hidden');
+        tip.hidden = true;
+    });
 }

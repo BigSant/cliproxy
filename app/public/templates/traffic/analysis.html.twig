@@ -1,0 +1,70 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}Analizė{% endblock %}
+
+{% block body %}
+    <div class="page-head">
+        <div class="title-line"><h1>Srauto analizė</h1></div>
+        {% include 'traffic/_filters.html.twig' %}
+    </div>
+    <section class="stats">
+        <div class="stat"><div class="stat-label">Užklausos</div><div class="stat-value">{{ totals.requests|tokens }}</div><div class="stat-sub">{{ totals.failed }} nepavyko ({{ totals.failed|share(totals.requests) }})</div></div>
+        <div class="stat"><div class="stat-label">Žmogaus prompt'ai</div><div class="stat-value">{{ totals.prompts|tokens }}</div><div class="stat-sub">{{ totals.sessions }} sesijos · {{ totals.prompts > 0 ? (totals.requests / totals.prompts)|number_format(1, ',') : '–' }} užkl. vienam prompt'ui</div></div>
+        <div class="stat"><div class="stat-label">Įrankių kvietimai</div><div class="stat-value">{{ totals.tool_calls|tokens }}</div><div class="stat-sub">{{ totals.tool_errors }} rezultatai su klaida ({{ totals.tool_errors|share(totals.tool_calls) }})</div></div>
+        <div class="stat"><div class="stat-label">Mąstymas</div><div class="stat-value">{{ totals.with_thinking|share(totals.requests) }}</div><div class="stat-sub">užklausų mąstė · {{ totals.reasoning|tokens }} mąstymo tokenų</div></div>
+    </section>
+
+    <div class="grid-2">
+        <section class="card">
+            <h2>Įrankiai</h2>
+            {% if tools is empty %}<p class="muted">Įrankių kvietimų nėra.</p>{% else %}
+                <div class="table-wrap">
+                    <table>
+                        <thead><tr><th>Įrankis</th><th class="num">Kvietimai</th><th class="num">Pavyko</th><th class="num">Klaida</th><th>Klaidų dalis</th></tr></thead>
+                        <tbody>
+                            {% for tool in tools %}
+                                {% set rate = tool.failed + tool.succeeded > 0 ? tool.failed / (tool.failed + tool.succeeded) * 100 : 0 %}
+                                <tr>
+                                    <td><code>{{ tool.name }}</code></td>
+                                    <td class="num">{{ tool.calls }}</td>
+                                    <td class="num">{{ tool.succeeded }}</td>
+                                    <td class="num {{ tool.failed ? 'bad' }}">{{ tool.failed }}</td>
+                                    <td><div class="quota quota-{{ rate >= 25 ? 'high' : (rate >= 10 ? 'warn' : 'ok') }}"><div class="quota-line"><span class="quota-value">{{ rate|number_format(0) }}%</span>{% if tool.unknown %}<span class="quota-reset">{{ tool.unknown }} neaišku</span>{% endif %}</div><div class="bar"><span style="width: {{ rate|number_format(0) }}%"></span></div></div></td>
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            {% endif %}
+        </section>
+        <section class="card">
+            <h2>Kaip baigėsi atsakymai</h2>
+            {% set most = max(1, (endings|first).count|default(1)) %}
+            {% for ending in endings %}
+                <div class="hbar"><span class="hbar-label">{{ ending.label }}</span><span class="hbar-track"><span style="width: {{ (ending.count / most * 100)|number_format(1, '.') }}%"></span></span><span class="num">{{ ending.count }}</span></div>
+            {% else %}
+                <p class="muted">Duomenų nėra.</p>
+            {% endfor %}
+            <p class="muted small">end_turn / completed – atsakė; tool_use – kvietė įrankius; max_tokens – nukirsta; HTTP – užklausa nepavyko.</p>
+        </section>
+    </div>
+
+    <section class="card">
+        <h2>Naujausios įrankių klaidos</h2>
+        {% for call in failures %}
+            <details class="tool-call">
+                <summary>
+                    <a href="{{ path('app_traffic_show', {id: call.exchange.id}) }}">{{ call.exchange.occurredAt|date('m-d H:i') }}</a>
+                    <code>{{ call.name }}</code>
+                    <span class="muted small">{{ call.output|u.truncate(140, '…') }}</span>
+                </summary>
+                <div class="tool-body">
+                    <pre class="text-block">{{ call.input }}</pre>
+                    <pre class="text-block is-error">{{ call.output }}</pre>
+                </div>
+            </details>
+        {% else %}
+            <p class="muted">Įrankių klaidų nėra.</p>
+        {% endfor %}
+    </section>
+{% endblock %}
