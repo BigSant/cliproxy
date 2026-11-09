@@ -27,6 +27,10 @@ class Settings
     public const string USAGE_REPLAYED_AT = 'usage_replayed_at';
     /** The last limits read's errors, by auth index (Paskyros shows them). */
     public const string QUOTA_ERRORS = 'quota_errors';
+    /** When each account's limits were last asked for, by auth index: the read goes on from the oldest. */
+    public const string QUOTA_ATTEMPTED_AT = 'quota_attempted_at';
+    /** The traffic log (CLIProxyAPI request-log): on unless false; ConfigBaseline keeps CLIProxyAPI to it. */
+    public const string REQUEST_LOG = 'request_log';
     /** Set by Įspėjimai; the collector moves the quarantined request logs back into logs/. */
     public const string QUARANTINE_RETRY_REQUESTED = 'quarantine_retry_requested';
 

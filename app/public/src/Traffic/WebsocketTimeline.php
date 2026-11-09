@@ -50,8 +50,9 @@ final class WebsocketTimeline
             if (null === $current) {
                 continue;
             }
-            $current['endedAt'] = $at ?? $current['endedAt'];
             if ('response' === $type) {
+                // The turn ends with its answer, not with the quiet before the connection closed.
+                $current['endedAt'] = $at ?? $current['endedAt'];
                 foreach (self::events($payload) as $event) {
                     // Only what makes the answer; the many *.delta events would only fill memory.
                     if (\in_array($event['type'] ?? null, self::ANSWER_EVENTS, true)) {

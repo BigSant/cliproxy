@@ -2,6 +2,7 @@
 
 namespace App\Controller;
 
+use App\CliProxy\ConfigBaseline;
 use App\CliProxy\ManagementClient;
 use App\CliProxy\ManagementException;
 use App\Settings\Settings;
@@ -103,8 +104,11 @@ class SettingsController extends AbstractController
     public function traffic(Request $request): RedirectResponse
     {
         $this->checkToken($request);
+        $enabled = $request->request->getBoolean('request_log');
+        $this->settings->set(Settings::REQUEST_LOG, $enabled);
+
         return $this->attempt(fn () => $this->client->patchConfig(['observability' => ['logs' => [
-            'request-log' => $request->request->getBoolean('request_log'),
+            'request-log' => $enabled,
             // 0: CLIProxyAPI's cleaner never deletes log files; the collector moves them into the archive.
             'logs-max-total-size-mb' => 0,
         ]]]), 'Srauto žurnalo nustatymai išsaugoti.');
@@ -145,6 +149,20 @@ class SettingsController extends AbstractController
         $this->checkToken($request);
         $yaml = str_replace("\r\n", "\n", (string) $request->request->get('yaml'));
         $etag = (string) $request->request->get('etag') ?: null;
+
+        try {
+            $parsed = \Symfony\Component\Yaml\Yaml::parse($yaml);
+        } catch (\Symfony\Component\Yaml\Exception\ParseException $exception) {
+            $this->addFlash('error', 'config.yaml neišsaugotas: '.$exception->getMessage());
+
+            return $this->redirectToRoute('app_settings');
+        }
+        $violations = ConfigBaseline::policyViolations(\is_array($parsed) ? $parsed : [], false !== $this->settings->get(Settings::REQUEST_LOG));
+        if ([] !== $violations) {
+            $this->addFlash('error', 'config.yaml neišsaugotas – pažeistų hub\'o duomenų politiką: '.implode('; ', $violations).'.');
+
+            return $this->redirectToRoute('app_settings');
+        }
 
         return $this->attempt(function () use ($yaml, $etag) {
             $keys = $this->client->apiKeys();

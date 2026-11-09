@@ -22,9 +22,15 @@ class UsageSpool
     }
 
     /** @param list<array<string, mixed>> $records */
+    public function dayOf(\DateTimeImmutable $now): string
+    {
+        return $now->setTimezone(new \DateTimeZone('UTC'))->format('Y-m-d');
+    }
+
+    /** @param list<array<string, mixed>> $records */
     public function append(array $records, \DateTimeImmutable $now): string
     {
-        $day = $now->setTimezone(new \DateTimeZone('UTC'))->format('Y-m-d');
+        $day = $this->dayOf($now);
         $this->ensureDirectory();
         $lines = '';
         foreach ($records as $record) {
@@ -33,11 +39,9 @@ class UsageSpool
         $path = $this->path($day);
         $new = !is_file($path);
         $handle = fopen($path, 'ab');
-        if (false === $handle || false === fwrite($handle, $lines) || !fflush($handle)) {
-            throw new \RuntimeException('Cannot write the usage spool '.$this->path($day));
-        }
-        if (\function_exists('fsync')) {
-            fsync($handle);
+        // Every byte or an error: a short write (a full disk) must not pass for a stored batch.
+        if (false === $handle || \strlen($lines) !== fwrite($handle, $lines) || !fflush($handle) || !fsync($handle)) {
+            throw new \RuntimeException('Cannot write the usage spool '.$path);
         }
         fclose($handle);
         if ($new) {
@@ -65,7 +69,12 @@ class UsageSpool
     /** @param list<string> $days */
     private function writePending(array $days): void
     {
-        file_put_contents($this->directory.'/'.self::PENDING, implode("\n", array_unique($days)).([] === $days ? '' : "\n"), \LOCK_EX);
+        $content = implode("\n", array_unique($days)).([] === $days ? '' : "\n");
+        $temporary = $this->directory.'/'.self::PENDING.'.tmp';
+        // Written whole and renamed: a crash never leaves half a list.
+        if (\strlen($content) !== @file_put_contents($temporary, $content) || !rename($temporary, $this->directory.'/'.self::PENDING)) {
+            throw new \RuntimeException('Cannot write the usage spool\'s pending list');
+        }
     }
 
     /** @return list<string> days whose records may be missing from the database */

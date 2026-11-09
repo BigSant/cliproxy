@@ -179,6 +179,57 @@ class CollectorTest extends KernelTestCase
         self::assertStringContainsString('Provider answered 500', (string) (self::getContainer()->get(Settings::class)->get(Settings::QUOTA_ERRORS)['idx-a@x'] ?? ''));
     }
 
+    public function testAFailoverToAnotherAccountNeverMakesAGroupNegativeEvenAcrossBatches(): void
+    {
+        $collector = self::getContainer()->get(Collector::class);
+        // The failed attempt on A, then (another batch, the same second) the retry that worked on B.
+        $this->cliProxy->queue = [['timestamp' => '2026-11-09T12:00:00Z', 'request_id' => 'req-x', 'provider' => 'claude', 'auth_index' => 'A', 'source' => 'a', 'failed' => true]];
+        $collector->collectUsage();
+        $this->cliProxy->queue = [['timestamp' => '2026-11-09T12:00:00Z', 'request_id' => 'req-x', 'provider' => 'claude', 'auth_index' => 'B', 'source' => 'b']];
+        $collector->collectUsage();
+
+        $usage = self::getContainer()->get(\App\Repository\UsageRecordRepository::class);
+        $since = new \DateTimeImmutable('2026-11-09T00:00:00Z');
+        self::assertSame([2, 1, 0], [$usage->totals($since)['attempts'], $usage->totals($since)['requests'], $usage->totals($since)['failed']]);
+        foreach ($usage->byAccount($since) as $row) {
+            self::assertGreaterThanOrEqual(0, $row['failed']);
+            self::assertGreaterThanOrEqual(0, $row['requests']);
+        }
+    }
+
+    public function testASpoolLineFromBeforeSanitizingIsNotStoredTwice(): void
+    {
+        $raw = ['timestamp' => '2026-11-09T12:00:00Z', 'request_id' => 'old', 'provider' => 'claude', 'api_key' => 'cpa-full-secret-1234'];
+        // Stored by an older collector with the key of the record as it came.
+        $legacy = UsageRecord::fromQueueRecord($raw);
+        $legacy->recordKey = UsageRecord::keyOf($raw);
+        $this->entityManager->persist($legacy);
+        $this->entityManager->flush();
+        $spool = self::getContainer()->get(UsageSpool::class);
+        $day = $spool->append([$raw], new \DateTimeImmutable('2026-11-09T12:00:00Z'));
+
+        self::assertSame(0, self::getContainer()->get(Collector::class)->replay($day));
+    }
+
+    public function testWithTheDatabaseAwayTheQueueStillGoesToTheSpoolAndComesInLater(): void
+    {
+        $this->cliProxy->queue = [['timestamp' => '2026-11-09T12:00:00Z', 'request_id' => 'r1', 'provider' => 'claude']];
+        $connection = $this->entityManager->getConnection();
+        $connection->executeStatement('ALTER TABLE usage_record RENAME TO usage_record_away');
+        $collector = self::getContainer()->get(Collector::class);
+        try {
+            $collector->collectUsage();
+            self::fail('the database error is reported');
+        } catch (\Doctrine\DBAL\Exception) {
+        }
+        self::assertSame([], $this->cliProxy->queue, 'taken anyway: CLIProxyAPI would drop it after an hour');
+        self::assertNotSame([], self::getContainer()->get(UsageSpool::class)->pendingDays());
+
+        $connection->executeStatement('ALTER TABLE usage_record_away RENAME TO usage_record');
+        self::getContainer()->get(\Doctrine\Persistence\ManagerRegistry::class)->resetManager();
+        self::assertSame(1, self::getContainer()->get(Collector::class)->collectUsage());
+    }
+
     public function testNothingOldIsDeleted(): void
     {
         $this->entityManager->persist(UsageRecord::fromQueueRecord(['timestamp' => '2020-01-01T00:00:00Z', 'provider' => 'claude']));

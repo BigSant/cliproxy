@@ -101,6 +101,22 @@ class AlertsAndHealthTest extends WebTestCase
         self::assertSame([], $watchdog->check(), 'told once');
         $watchdog->beat('https://ntfy.sh/hub-test');
         self::assertSame(['collector' => 'resolved'], $watchdog->check());
+
+        // The database away, the topic unknown to the collector: the watchdog keeps the one it has.
+        $watchdog->beat(null);
+        self::assertSame('https://ntfy.sh/hub-test', file_get_contents('/tmp/cliproxy-test/.ntfy'));
+    }
+
+    public function testAConfigYamlThatBreaksTheDataPolicyIsRefused(): void
+    {
+        $this->browser->loginUser(new InMemoryUser('admin', 'test-password', ['ROLE_ADMIN']));
+        $this->browser->request('GET', '/settings');
+        $this->browser->submitForm('Išsaugoti config.yaml', ['yaml' => "config-version: 8\naccess:\n  api-keys: [\"<raktas-1>\"]\nobservability:\n  logs:\n    logs-max-total-size-mb: 100\n    request-log: false\n"]);
+        $this->browser->followRedirect();
+
+        self::assertAnySelectorTextContains('.flash-error', 'log failų valymas');
+        self::assertAnySelectorTextContains('.flash-error', 'request-log');
+        self::assertNull($this->cliProxy->savedYaml);
     }
 
     public function testHealthChecksTheDatabaseAndCliProxy(): void
@@ -124,10 +140,11 @@ class AlertsAndHealthTest extends WebTestCase
     {
         $this->browser->loginUser(new InMemoryUser('admin', 'test-password', ['ROLE_ADMIN']));
         $crawler = $this->browser->request('GET', '/settings');
-        $yaml = $crawler->filter('textarea[name="yaml"]')->text();
+        // As the textarea holds it: line breaks kept.
+        $yaml = $crawler->filter('textarea[name="yaml"]')->text(null, false);
         self::assertStringNotContainsString('key-one', $yaml);
 
-        $this->browser->submitForm('Išsaugoti config.yaml', ['yaml' => $yaml."debug: true\n"]);
+        $this->browser->submitForm('Išsaugoti config.yaml', ['yaml' => rtrim($yaml)."\ndebug: true\n"]);
         self::assertStringContainsString('key-one', (string) $this->cliProxy->savedYaml);
 
         // The form still holds the old ETag: the file changed since.

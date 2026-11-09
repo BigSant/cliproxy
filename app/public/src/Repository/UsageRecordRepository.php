@@ -15,11 +15,10 @@ use Doctrine\Persistence\ManagerRegistry;
  */
 class UsageRecordRepository extends ServiceEntityRepository
 {
-    // A retry or a switch to another account is another record of the same request, marked is_retry: requests are the
-    // records without retries, failed requests the failed records whose failure no retry followed (failed − retries:
-    // every retry follows one failed attempt). Attempts are all records.
-    private const string SUMS = 'COUNT(*) - SUM(CASE WHEN is_retry = 1 THEN 1 ELSE 0 END) AS requests,'
-        .' COUNT(*) AS attempts, SUM(CASE WHEN failed = 1 THEN 1 ELSE 0 END) - SUM(CASE WHEN is_retry = 1 THEN 1 ELSE 0 END) AS failed,'
+    // A failed attempt that another attempt of the same request followed is "superseded": requests are the records that
+    // are not, failed requests the failed records that are not (the last attempt failed too). Attempts are all records.
+    private const string SUMS = 'SUM(CASE WHEN superseded = 1 THEN 0 ELSE 1 END) AS requests,'
+        .' COUNT(*) AS attempts, SUM(CASE WHEN failed = 1 AND superseded = 0 THEN 1 ELSE 0 END) AS failed,'
         .' SUM(input_tokens) AS input, SUM(output_tokens) AS output, SUM(cache_read_tokens) AS cache_read,'
         .' SUM(cache_creation_tokens) AS cache_creation, SUM(cache_creation5m_tokens) AS cache_5m,'
         .' SUM(cache_creation1h_tokens) AS cache_1h, SUM(total_tokens) AS total';
@@ -136,12 +135,12 @@ class UsageRecordRepository extends ServiceEntityRepository
      *
      * @param list<string> $requestIds
      *
-     * @return list<array{request_id: string, at: int, failed: bool}>
+     * @return list<array{request_id: string, at: int, failed: bool, id: int}>
      */
     public function attemptsOf(array $requestIds): array
     {
         $rows = $this->getEntityManager()->getConnection()->createQueryBuilder()
-            ->select('request_id, occurred_at, failed')
+            ->select('id, request_id, occurred_at, failed')
             ->from('usage_record')
             ->where('request_id IN (:ids)')
             ->setParameter('ids', $requestIds, \Doctrine\DBAL\ArrayParameterType::STRING)
@@ -151,6 +150,7 @@ class UsageRecordRepository extends ServiceEntityRepository
             'request_id' => (string) $row['request_id'],
             'at' => (new \DateTimeImmutable((string) $row['occurred_at'], new \DateTimeZone('UTC')))->getTimestamp(),
             'failed' => (bool) $row['failed'],
+            'id' => (int) $row['id'],
         ], $rows);
     }
 

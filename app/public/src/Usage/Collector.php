@@ -55,21 +55,24 @@ class Collector
         $failure = null;
         try {
             $stored += $this->replayPending();
+            $stored += $this->replayRecentIfDue();
         } catch (\Throwable $exception) {
+            // The database (or the spool) is away: the queue is still taken below, into the spool.
             $failure = $exception;
             $this->doctrine->resetManager();
         }
-        $stored += $this->replayRecentIfDue();
         $done = $failed = [];
         do {
             $records = array_map(UsageRecord::sanitize(...), $this->client->takeUsage(self::BATCH));
+            // (store() sanitizes again: idempotent, and replays of older spool lines need it.)
             if ([] === $records) {
                 break;
             }
             $day = null;
             try {
+                // The mark first: a crash right after the append still leaves the day to replay.
+                $this->spool->markPending($this->spool->dayOf($this->clock->now()));
                 $day = $this->spool->append($records, $this->clock->now());
-                $this->spool->markPending($day);
             } catch (\Throwable $exception) {
                 $failure ??= new \RuntimeException('Usage spool not written ('.$exception->getMessage().'): the records go to the database only', 0, $exception);
             }
@@ -93,7 +96,7 @@ class Collector
         foreach (array_keys(array_diff_key($done, $failed)) as $day) {
             $this->spool->unmarkPending($day);
         }
-        if ($this->limitsChanged && $this->settings->autoPriority() && null === $failure) {
+        if (null === $failure && $this->limitsChanged && $this->settings->autoPriority()) {
             $this->limitsChanged = false;
             $this->prioritizer->apply($this->client->accounts(), $this->snapshots->latest(), $this->clock->now());
         }
@@ -109,7 +112,7 @@ class Collector
     {
         $stored = 0;
         foreach ($this->spool->read($day) as $records) {
-            $stored += $this->store(array_map(UsageRecord::sanitize(...), $records));
+            $stored += $this->store($records);
         }
 
         return $stored;
@@ -137,23 +140,35 @@ class Collector
             || $this->clock->now()->getTimestamp() - $last->getTimestamp() >= $this->settings->quotaRefreshMinutes() * 60 - 5;
     }
 
-    /** @return int the accounts read */
+    /**
+     * Reads the accounts' limits, the longest unread first (a cursor by last attempt): when the 40-second budget runs
+     * out, the next pass goes on where this one stopped. "Read" is marked only once every account had its turn.
+     *
+     * @return int the accounts read
+     */
     public function refreshQuotas(): int
     {
-        $accounts = $this->client->accounts();
+        $accounts = array_values(array_filter($this->client->accounts(), static fn ($account) => $account->isClaude() || $account->isCodex()));
         $entityManager = $this->doctrine->getManager();
         $userAgents = $this->usage->latestUserAgents();
         $latest = $this->snapshots->latest();
-        $errors = [];
+        $attempted = (array) ($this->settings->get(Settings::QUOTA_ATTEMPTED_AT) ?? []);
+        $errors = (array) ($this->settings->get(Settings::QUOTA_ERRORS) ?? []);
+        usort($accounts, static fn ($a, $b) => ($attempted[$a->authIndex] ?? '') <=> ($attempted[$b->authIndex] ?? ''));
         // Each provider request may take 10 s; the whole read stays well inside the collector's minute.
         $deadline = microtime(true) + 40;
+        $read = 0;
         foreach ($accounts as $account) {
-            if ((!$account->isClaude() && !$account->isCodex()) || microtime(true) > $deadline) {
-                continue;
+            if (microtime(true) > $deadline) {
+                break;
             }
             $snapshot = $this->quotaFetcher->fetch($account, $userAgents[$account->provider] ?? null);
+            $attempted[$account->authIndex] = $this->clock->now()->format(\DATE_ATOM);
+            ++$read;
             if (null !== $snapshot->error) {
                 $errors[$account->authIndex] = $this->clock->now()->format('Y-m-d H:i').': '.$snapshot->error;
+            } else {
+                unset($errors[$account->authIndex]);
             }
             $previous = $latest[$account->authIndex] ?? null;
             if ('headers' === $snapshot->source) {
@@ -166,14 +181,17 @@ class Collector
             $entityManager->persist($snapshot);
         }
         $entityManager->flush();
+        $this->settings->set(Settings::QUOTA_ATTEMPTED_AT, $attempted);
         $this->settings->set(Settings::QUOTA_ERRORS, $errors);
-        $this->settings->markNow(Settings::QUOTA_REFRESHED_AT, $this->clock->now());
-        $this->settings->set(Settings::QUOTA_REFRESH_REQUESTED, false);
+        if ($read === \count($accounts)) {
+            $this->settings->markNow(Settings::QUOTA_REFRESHED_AT, $this->clock->now());
+            $this->settings->set(Settings::QUOTA_REFRESH_REQUESTED, false);
+        }
         if ($this->settings->autoPriority()) {
-            $this->prioritizer->apply($accounts, $this->snapshots->latest(), $this->clock->now());
+            $this->prioritizer->apply($this->client->accounts(), $this->snapshots->latest(), $this->clock->now());
         }
 
-        return \count($accounts);
+        return $read;
     }
 
     private function replayPending(): int
@@ -222,40 +240,51 @@ class Collector
     {
         $entityManager = $this->doctrine->getManager();
         $rows = [];
+        $legacyKeys = [];
         foreach ($records as $record) {
-            $row = UsageRecord::fromQueueRecord($record);
+            $row = UsageRecord::fromQueueRecord(UsageRecord::sanitize($record));
             $rows[$row->recordKey] = $row;
+            // A record stored before sanitizing existed has the key of the record as it came.
+            $legacyKeys[UsageRecord::keyOf($record)] = $row->recordKey;
         }
-        foreach ($this->usage->existingKeys(array_keys($rows)) as $key) {
-            unset($rows[$key]);
+        foreach ($this->usage->existingKeys(array_merge(array_keys($rows), array_keys($legacyKeys))) as $key) {
+            unset($rows[$legacyKeys[$key] ?? $key]);
         }
         $this->markRetries($rows);
+        // A record's timestamp is when its request started; its headers are from when the answer came.
+        $answeredAt = static fn (UsageRecord $row) => $row->occurredAt->modify('+'.max(0, $row->latencyMs).' milliseconds');
         $newestWithHeaders = [];
         foreach ($rows as $row) {
             $entityManager->persist($row);
             if ('' !== $row->authIndex && [] !== $row->rateLimitHeaders()
-                && (!isset($newestWithHeaders[$row->authIndex]) || $row->occurredAt > $newestWithHeaders[$row->authIndex]->occurredAt)) {
+                && (!isset($newestWithHeaders[$row->authIndex]) || $answeredAt($row) > $answeredAt($newestWithHeaders[$row->authIndex]))) {
                 $newestWithHeaders[$row->authIndex] = $row;
             }
         }
         $latest = [] === $newestWithHeaders ? [] : $this->snapshots->latest();
         foreach ($newestWithHeaders as $authIndex => $row) {
             $previous = $latest[$authIndex] ?? null;
-            if (null !== $previous && $row->occurredAt->getTimestamp() < $previous->fetchedAt->getTimestamp() + self::HEADER_SNAPSHOT_SECONDS) {
+            $at = $answeredAt($row);
+            if (null !== $previous && $at <= $previous->fetchedAt) {
                 continue;
             }
             $windows = [];
-            foreach (QuotaFetcher::fromHeaders($row->rateLimitHeaders(), $row->occurredAt) as $window) {
+            foreach (QuotaFetcher::fromHeaders($row->rateLimitHeaders(), $at) as $window) {
                 $windows[$window->key] = $window;
             }
             if ([] === $windows) {
                 continue;
             }
-            // The headers know the 5-hour and weekly windows; others (Claude's weekly Fable) carry over.
+            // At most one a minute, unless a window is at 90 % or more: the moment an account runs out is never skipped.
+            $critical = [] !== array_filter($windows, static fn ($window) => $window->used >= 90);
+            if (null !== $previous && !$critical && $at->getTimestamp() < $previous->fetchedAt->getTimestamp() + self::HEADER_SNAPSHOT_SECONDS) {
+                continue;
+            }
+            // The headers know their windows; others (Claude's weekly Fable when it is not sent) carry over.
             foreach ($previous?->windows() ?? [] as $window) {
                 $windows[$window->key] ??= $window;
             }
-            $entityManager->persist(new QuotaSnapshot($authIndex, $row->account, $row->provider, $row->occurredAt,
+            $entityManager->persist(new QuotaSnapshot($authIndex, $row->account, $row->provider, $at,
                 array_values($windows), 'headers', $previous?->plan, $previous?->bankedResets));
             $this->limitsChanged = true;
         }
@@ -266,9 +295,9 @@ class Collector
     }
 
     /**
-     * A record is a retry when the attempt before it of the same request (in the database or earlier in this batch)
-     * failed within ten minutes before it. A Codex WebSocket connection shares one request id across its turns; a
-     * successful turn before it makes a record a new turn, not a retry.
+     * Attempts of one request in time order (a failed one first when two share a second): an attempt after a failed one
+     * within ten minutes is a retry, and the failed one is superseded – in this batch or already in the database. A
+     * Codex WebSocket connection shares one request id across its turns; a turn after a successful one is no retry.
      *
      * @param array<string, UsageRecord> $rows
      */
@@ -277,24 +306,36 @@ class Collector
         $byRequest = [];
         foreach ($rows as $row) {
             if ('' !== $row->requestId) {
-                $byRequest[$row->requestId][] = ['at' => $row->occurredAt->getTimestamp(), 'failed' => $row->failed, 'row' => $row];
+                $byRequest[$row->requestId][] = ['at' => $row->occurredAt->getTimestamp(), 'failed' => $row->failed, 'row' => $row, 'id' => null];
             }
         }
         if ([] === $byRequest) {
             return;
         }
         foreach ($this->usage->attemptsOf(array_keys($byRequest)) as $attempt) {
-            $byRequest[$attempt['request_id']][] = ['at' => $attempt['at'], 'failed' => $attempt['failed'], 'row' => null];
+            $byRequest[$attempt['request_id']][] = ['at' => $attempt['at'], 'failed' => $attempt['failed'], 'row' => null, 'id' => $attempt['id']];
         }
+        $supersede = [];
         foreach ($byRequest as $attempts) {
-            usort($attempts, static fn (array $a, array $b) => $a['at'] <=> $b['at']);
+            usort($attempts, static fn (array $a, array $b) => [$a['at'], !$a['failed']] <=> [$b['at'], !$b['failed']]);
             $previous = null;
             foreach ($attempts as $attempt) {
-                if (null !== $attempt['row'] && null !== $previous && $previous['failed'] && $attempt['at'] - $previous['at'] <= 600) {
-                    $attempt['row']->isRetry = true;
+                if (null !== $previous && $previous['failed'] && $attempt['at'] - $previous['at'] <= 600) {
+                    if (null !== $attempt['row']) {
+                        $attempt['row']->isRetry = true;
+                    }
+                    if (null !== $previous['row']) {
+                        $previous['row']->superseded = true;
+                    } elseif (null !== $previous['id']) {
+                        $supersede[] = $previous['id'];
+                    }
                 }
                 $previous = $attempt;
             }
+        }
+        if ([] !== $supersede) {
+            $this->doctrine->getManager()->getConnection()->executeStatement('UPDATE usage_record SET superseded = 1 WHERE id IN (?)',
+                [array_values(array_unique($supersede))], [\Doctrine\DBAL\ArrayParameterType::INTEGER]);
         }
     }
 }

@@ -30,6 +30,7 @@ CREATE TABLE `usage_record` (
   `is_compaction` tinyint NOT NULL DEFAULT '0',
   `raw` json DEFAULT NULL,
   `is_retry` tinyint NOT NULL DEFAULT '0',
+  `superseded` tinyint NOT NULL DEFAULT '0',
   PRIMARY KEY (`id`),
   UNIQUE KEY `usage_record_key` (`record_key`),
   KEY `usage_occurred` (`occurred_at`),

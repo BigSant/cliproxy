@@ -219,6 +219,39 @@ class TrafficTest extends WebTestCase
         self::assertSame(['Labas', 'Labas!', 'completed', false, 200], [$turn->prompt, $turn->answer, $turn->stopReason, $turn->failed, $turn->statusCode]);
     }
 
+    public function testAPrewarmTakesNoUsageRecordAndAReparseSupersedesTheOldWholeExchange(): void
+    {
+        $event = static fn (string $at, string $type, array $payload) => "Timestamp: $at\nEvent: websocket.$type\n".json_encode($payload)."\n";
+        $timeline = implode("\n", [
+            $event('2026-11-09T15:00:00.000000000+02:00', 'request', ['type' => 'response.create', 'model' => 'gpt-5.5-codex', 'generate' => false, 'input' => []]),
+            $event('2026-11-09T15:00:00.100000000+02:00', 'response', ['type' => 'response.completed', 'response' => ['status' => 'completed', 'output' => []]]),
+            $event('2026-11-09T15:00:10.000000000+02:00', 'request', ['type' => 'response.create', 'model' => 'gpt-5.5-codex', 'input' => [['type' => 'message', 'role' => 'user', 'content' => 'Labas']]]),
+            $event('2026-11-09T15:00:12.000000000+02:00', 'response', ['type' => 'response.completed', 'response' => ['status' => 'completed', 'output' => []]]),
+        ]);
+        $name = 'v1-responses-2026-11-09T150000-pwpw1234.log';
+        $text = "=== REQUEST INFO ===\nURL: /v1/responses\nMethod: GET\nTimestamp: 2026-11-09T15:00:00.000000000+02:00\n\n=== HEADERS ===\nUser-Agent: codex\n\n=== WEBSOCKET TIMELINE ===\n".$timeline."\n";
+        // An older parser's single exchange of this connection.
+        $old = new Exchange();
+        $old->logFile = $name;
+        $old->failed = true;
+        $this->entityManager->persist($old);
+        $this->entityManager->persist(UsageRecord::fromQueueRecord(['timestamp' => '2026-11-09T13:00:12Z', 'request_id' => 'conn-pwpw1234', 'provider' => 'codex', 'source' => 'turn@x', 'auth_index' => 'c']));
+        $this->entityManager->flush();
+        $this->write($name, $text);
+
+        $ingester = self::getContainer()->get(TrafficIngester::class);
+        $ingester->ingest();
+        $ingester->linkAccounts();
+
+        $exchanges = $this->entityManager->getRepository(Exchange::class);
+        self::assertSame('superseded', $exchanges->findOneBy(['logFile' => $name])->kind);
+        self::assertSame('0', $exchanges->findOneBy(['logFile' => $name.'#1'])->usageRecordId, 'the prewarm is never linked');
+        self::assertSame('turn@x', $exchanges->findOneBy(['logFile' => $name.'#2'])->account, 'the turn gets the record');
+        $this->browser->loginUser(new InMemoryUser('admin', 'test-password', ['ROLE_ADMIN']));
+        $this->browser->request('GET', '/traffic?range=all');
+        self::assertSelectorCount(2, 'table.traffic tbody tr.row-link', 'the superseded one is not listed');
+    }
+
     public function testSearchFindsShortWordsToo(): void
     {
         $this->write('v1-messages-2026-11-09T150000-aaaa1111.log', RequestLogs::claudeToolUse());
@@ -231,15 +264,22 @@ class TrafficTest extends WebTestCase
         self::assertSelectorCount(0, 'table.traffic tbody tr.row-link');
     }
 
-    public function testUnfinishedLogPiecesMoveToTheArchiveAfterAnHour(): void
+    public function testUnfinishedLogPiecesIdleForADayAreCopiedToTheArchiveAndLeftInPlace(): void
     {
         mkdir(self::LOGS.'/request-log-parts-abc');
         file_put_contents(self::LOGS.'/request-log-parts-abc/part.tmp', 'timeline');
+        $ingester = self::getContainer()->get(TrafficIngester::class);
+        // An hour of quiet is a WebSocket connection that may still go on: untouched.
         touch(self::LOGS.'/request-log-parts-abc/part.tmp', strtotime('2026-11-09 13:00:00 Europe/Vilnius'));
         touch(self::LOGS.'/request-log-parts-abc', strtotime('2026-11-09 13:00:00 Europe/Vilnius'));
+        self::assertSame(0, $ingester->collectOrphans());
 
-        self::assertSame(1, self::getContainer()->get(TrafficIngester::class)->collectOrphans());
-        self::assertFileExists(self::ARCHIVE.'/orphans/2026-11-09/request-log-parts-abc/part.tmp');
+        touch(self::LOGS.'/request-log-parts-abc/part.tmp', strtotime('2026-11-08 12:00:00 Europe/Vilnius'));
+        touch(self::LOGS.'/request-log-parts-abc', strtotime('2026-11-08 12:00:00 Europe/Vilnius'));
+        self::assertSame(1, $ingester->collectOrphans());
+        self::assertSame(0, $ingester->collectOrphans(), 'copied once');
+        self::assertFileExists(self::ARCHIVE.'/orphans/2026-11-08/request-log-parts-abc/part.tmp');
+        self::assertFileExists(self::LOGS.'/request-log-parts-abc/part.tmp', 'CLIProxyAPI\'s own stays');
     }
 
     public function testInjectedRemindersAreNotPartOfThePrompt(): void

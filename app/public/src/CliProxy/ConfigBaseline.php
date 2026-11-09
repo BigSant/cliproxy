@@ -36,7 +36,10 @@ class ConfigBaseline
     public function apply(): bool
     {
         $config = $this->client->config();
-        $patch = self::missing($config, self::ALWAYS);
+        // Request logs are the traffic log: on unless switched off in Nustatymai (not through config.yaml by the way).
+        $always = self::ALWAYS;
+        $always['observability']['logs']['request-log'] = false !== $this->settings->get(Settings::REQUEST_LOG);
+        $patch = self::missing($config, $always);
         $once = $this->settings->get(Settings::CONFIG_BASELINE) !== self::VERSION;
         if ($once) {
             $patch = array_replace_recursive($patch, self::missing($config, self::ONCE));
@@ -49,6 +52,34 @@ class ConfigBaseline
         }
 
         return [] !== $patch;
+    }
+
+    /**
+     * What a config.yaml saved from the editor may not do: the reasons it breaks the hub's data policy.
+     *
+     * @param array<string, mixed> $config the parsed YAML
+     *
+     * @return list<string>
+     */
+    public static function policyViolations(array $config, bool $requestLog): array
+    {
+        $violations = [];
+        $logs = (array) ($config['observability']['logs'] ?? []);
+        $usage = (array) ($config['observability']['usage'] ?? []);
+        if ((int) ($logs['logs-max-total-size-mb'] ?? 0) > 0 || (int) ($logs['error-logs-max-files'] ?? 0) > 0) {
+            $violations[] = 'log failų valymas (logs-max-total-size-mb, error-logs-max-files turi būti 0)';
+        }
+        if (false === ($usage['usage-statistics-enabled'] ?? true)) {
+            $violations[] = 'usage statistika išjungta';
+        }
+        if ($requestLog && false === ($logs['request-log'] ?? true)) {
+            $violations[] = 'request-log išjungtas (išjunk Nustatymuose → Srauto žurnalas, jei tikrai reikia)';
+        }
+        if ([] === ($config['access']['api-keys'] ?? null)) {
+            $violations[] = 'tuščias klientų raktų sąrašas išjungtų autentifikaciją';
+        }
+
+        return $violations;
     }
 
     /**

@@ -20,6 +20,9 @@ use Doctrine\ORM\Mapping as ORM;
 #[ORM\Index(name: 'exchange_fulltext', columns: ['prompt', 'answer', 'thinking', 'error'], flags: ['fulltext'])]
 class Exchange
 {
+    /** An older parse of a log that a newer one replaced (a WebSocket connection read as one exchange): kept, not counted. */
+    public const string KIND_SUPERSEDED = 'superseded';
+
     #[ORM\Id]
     #[ORM\GeneratedValue]
     #[ORM\Column(type: Types::BIGINT)]

@@ -80,7 +80,15 @@ class ExchangeRepository extends ServiceEntityRepository
     /** @return list<Exchange> a session's requests in order */
     public function session(string $sessionId, int $limit = 500): array
     {
-        return $this->findBy(['sessionId' => $sessionId], ['occurredAt' => 'ASC', 'id' => 'ASC'], $limit);
+        return $this->createQueryBuilder('e')
+            ->where('e.sessionId = :session')
+            ->andWhere("e.kind <> 'superseded'")
+            ->setParameter('session', $sessionId)
+            ->orderBy('e.occurredAt', 'ASC')
+            ->addOrderBy('e.id', 'ASC')
+            ->setMaxResults($limit)
+            ->getQuery()
+            ->getResult();
     }
 
     /**
@@ -106,6 +114,7 @@ class ExchangeRepository extends ServiceEntityRepository
                 'SUM(cache_read_tokens) AS cache_read, SUM(cache_creation_tokens) AS cache_creation')
             ->from('exchange')
             ->where('occurred_at >= :since')
+            ->andWhere("kind <> 'superseded'")
             ->andWhere("session_id <> ''")
             ->setParameter('since', self::utc($since))
             ->groupBy('session_id')
@@ -129,6 +138,7 @@ class ExchangeRepository extends ServiceEntityRepository
                 'COUNT(DISTINCT session_id) AS sessions, SUM(duration_ms) AS duration_ms, SUM(output_tokens) AS output, SUM(reasoning_tokens) AS reasoning')
             ->from('exchange')
             ->where('occurred_at >= :since')
+            ->andWhere("kind <> 'superseded'")
             ->setParameter('since', self::utc($since))
             ->fetchAssociative() ?: [];
 
@@ -142,6 +152,7 @@ class ExchangeRepository extends ServiceEntityRepository
             ->select('failed, status_code, stop_reason, COUNT(*) AS count')
             ->from('exchange')
             ->where('occurred_at >= :since')
+            ->andWhere("kind <> 'superseded'")
             ->setParameter('since', self::utc($since))
             ->groupBy('failed, status_code, stop_reason')
             ->fetchAllAssociative();
@@ -177,6 +188,7 @@ class ExchangeRepository extends ServiceEntityRepository
     {
         $query = $this->createQueryBuilder('e')
             ->where('e.occurredAt >= :since')
+            ->andWhere("e.kind <> 'superseded'")
             ->setParameter('since', $since, 'utc_datetime_immutable');
         foreach (['provider', 'model', 'sessionId' => 'session', 'account'] as $field => $key) {
             $field = \is_int($field) ? $key : $field;

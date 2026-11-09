@@ -49,6 +49,7 @@ class ToolCallRepository extends ServiceEntityRepository
             ->from('tool_call', 'c')
             ->innerJoin('c', 'exchange', 'e', 'e.id = c.exchange_id')
             ->where('e.occurred_at >= :since')
+            ->andWhere("e.kind <> 'superseded'")
             ->setParameter('since', $since->setTimezone(new \DateTimeZone('UTC'))->format('Y-m-d H:i:s'))
             ->groupBy('c.name')
             ->orderBy('calls', 'DESC');
@@ -72,6 +73,7 @@ class ToolCallRepository extends ServiceEntityRepository
             ->addSelect('e')
             ->innerJoin('c.exchange', 'e')
             ->where('c.isError = true')
+            ->andWhere("e.kind <> 'superseded'")
             ->andWhere('e.occurredAt >= :since')
             ->setParameter('since', $since, 'utc_datetime_immutable')
             ->orderBy('e.occurredAt', 'DESC')
