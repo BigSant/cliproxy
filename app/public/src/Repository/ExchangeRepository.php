@@ -30,7 +30,7 @@ class ExchangeRepository extends ServiceEntityRepository
     public function search(array $filters, \DateTimeImmutable $since, int $limit, int $offset = 0): array
     {
         return $this->filtered($filters, $since)
-            ->select('e.id, e.occurredAt, e.provider, e.model, e.endpoint, e.account, e.kind, e.promptKind, e.hasThinking',
+            ->select('e.id, e.occurredAt, e.provider, e.model, e.reasoningEffort, e.endpoint, e.account, e.kind, e.promptKind, e.hasThinking',
                 'e.toolCallCount, e.toolErrorCount, e.inputTokens, e.outputTokens, e.cacheReadTokens, e.cacheCreationTokens',
                 'e.durationMs, e.failed, e.statusCode, e.stopReason',
                 'SUBSTRING(e.prompt, 1, '.self::EXCERPT.') AS prompt, SUBSTRING(e.answer, 1, '.self::EXCERPT.') AS answer',
@@ -100,13 +100,13 @@ class ExchangeRepository extends ServiceEntityRepository
     {
         return array_map(static function (array $row) {
             foreach ($row as $key => $value) {
-                $row[$key] = \in_array($key, ['session_id', 'started', 'ended', 'account', 'model', 'provider'], true) ? (string) $value : (int) $value;
+                $row[$key] = \in_array($key, ['session_id', 'started', 'ended', 'account', 'model', 'provider', 'effort'], true) ? (string) $value : (int) $value;
             }
 
             return $row;
         }, $this->getEntityManager()->getConnection()->createQueryBuilder()
             ->select('session_id, MIN(occurred_at) AS started, MAX(occurred_at) AS ended, MAX(account) AS account',
-                'MAX(model) AS model, MAX(provider) AS provider, COUNT(*) AS requests',
+                'MAX(model) AS model, MAX(reasoning_effort) AS effort, MAX(provider) AS provider, COUNT(*) AS requests',
                 "SUM(CASE WHEN prompt_kind = 'user' AND kind = 'main' THEN 1 ELSE 0 END) AS prompts",
                 'SUM(tool_call_count) AS tool_calls, SUM(tool_error_count) AS tool_errors',
                 'SUM(CASE WHEN failed = 1 THEN 1 ELSE 0 END) AS failed',

@@ -6,7 +6,7 @@
 {% block body %}
     <div class="page-head">
         <div class="title-line">
-            <h1><span class="provider provider-{{ exchange.provider }}">{{ exchange.model ?: exchange.endpoint }}</span></h1>
+            <h1><span class="provider provider-{{ exchange.provider }}">{{ exchange.model ?: exchange.endpoint }}</span>{% if exchange.reasoningEffort %} <span class="kind kind-effort" title="Reasoning effort">{{ exchange.reasoningEffort }}</span>{% endif %}</h1>
             {% include 'traffic/_status.html.twig' %}
             <span class="muted">{{ exchange.occurredAt|date('Y-m-d H:i:s') }}</span>
         </div>

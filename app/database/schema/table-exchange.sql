@@ -37,6 +37,7 @@ CREATE TABLE `exchange` (
   `has_thinking` tinyint NOT NULL DEFAULT '0',
   `usage_record_id` bigint DEFAULT NULL,
   `occurred_micros` int NOT NULL DEFAULT '0',
+  `reasoning_effort` varchar(32) NOT NULL DEFAULT '',
   PRIMARY KEY (`id`),
   UNIQUE KEY `UNIQ_D33BB0799DF1D865` (`log_file`),
   KEY `exchange_occurred` (`occurred_at`),

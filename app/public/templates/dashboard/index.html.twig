@@ -84,7 +84,7 @@
                         <tr class="{{ record.failed ? 'is-failed' }}">
                             <td>{{ record.occurredAt|date('H:i:s') }}</td>
                             <td><span class="email">{{ record.account }}</span></td>
-                            <td><span class="provider provider-{{ record.provider }}">{{ record.model }}</span></td>
+                            <td><span class="provider provider-{{ record.provider }}">{{ record.model }}</span>{% if record.reasoningEffort %} <span class="kind kind-effort" title="Reasoning effort">{{ record.reasoningEffort }}</span>{% endif %}</td>
                             <td class="num">{{ record.inputTokens|tokens }}</td>
                             <td class="num">{{ record.outputTokens|tokens }}</td>
                             <td class="num">{{ record.cacheReadTokens|tokens }}</td>

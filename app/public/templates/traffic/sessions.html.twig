@@ -16,7 +16,7 @@
                         <tr class="row-link" data-href="{{ path('app_traffic_session', {sessionId: s.session_id}) }}">
                             <td class="nowrap">{{ s.ended|date('m-d H:i') }}<div class="muted small">nuo {{ s.started|date('H:i') }}</div></td>
                             <td><a href="{{ path('app_traffic_session', {sessionId: s.session_id}) }}"><code>{{ s.session_id|u.truncate(13, '…') }}</code></a></td>
-                            <td><span class="provider provider-{{ s.provider }}">{{ s.model }}</span><div class="muted small email">{{ s.account ?: '–' }}</div></td>
+                            <td><span class="provider provider-{{ s.provider }}">{{ s.model }}</span>{% if s.effort %} <span class="kind kind-effort" title="Reasoning effort">{{ s.effort }}</span>{% endif %}<div class="muted small email">{{ s.account ?: '–' }}</div></td>
                             <td class="num">{{ s.prompts }}</td>
                             <td class="num">{{ s.requests }}{% if s.failed %} <span class="bad">/ {{ s.failed }}</span>{% endif %}</td>
                             <td class="num">{{ s.tool_calls }}</td>

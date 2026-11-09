@@ -32,6 +32,7 @@ final class ResponsesFormat
     private static function readRequest(array $request, Turn $turn): void
     {
         $turn->model = (string) ($request['model'] ?? '');
+        $turn->effort = (string) ($request['reasoning']['effort'] ?? '');
         $turn->stream = (bool) ($request['stream'] ?? false);
         $turn->systemChars = mb_strlen((string) ($request['instructions'] ?? ''));
         $turn->toolsDeclared = \is_array($request['tools'] ?? null) ? \count($request['tools']) : 0;

@@ -9,6 +9,7 @@ final class AnthropicFormat
     public static function read(array $request, string $response, Turn $turn): void
     {
         $turn->model = (string) ($request['model'] ?? '');
+        $turn->effort = (string) ($request['output_config']['effort'] ?? '');
         $turn->stream = (bool) ($request['stream'] ?? false);
         $messages = \is_array($request['messages'] ?? null) ? $request['messages'] : [];
         $turn->messageCount = \count($messages);

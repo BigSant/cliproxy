@@ -42,10 +42,10 @@ class UsageRecordRepository extends ServiceEntityRepository
         return $this->grouped($since, 'auth_index', 'auth_index, MAX(account) AS account, MAX(provider) AS provider, MAX(occurred_at) AS last_at');
     }
 
-    /** @return list<array<string, int|string>> one row per model, busiest first */
+    /** @return list<array<string, int|string>> one row per model and reasoning effort, busiest first */
     public function byModel(\DateTimeImmutable $since): array
     {
-        return $this->grouped($since, 'model', 'model, MAX(provider) AS provider');
+        return $this->grouped($since, 'model, reasoning_effort', 'model, reasoning_effort AS effort, MAX(provider) AS provider');
     }
 
     /**
