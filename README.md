@@ -201,7 +201,8 @@ Apžvalgoje ir Įspėjimuose, kiti dirba toliau.
    nes ilgas WS ryšys gali tylėti valandą ir tęstis.
 3. Kai laikas arba paspaudus „Perskaityti“ – limitai (`quota_snapshot`) ir prioritetai. Paskyros skaitomos nuo
    seniausiai bandytos (kursorius `quota_attempted_at`), 40 s biudžetu; „perskaityta“ žymima, kai savo eilę gavo visos.
-4. Kartą per paleidimą – konfigūracijos bazė, CLIProxyAPI versija (naujausia – kas 6 val.), įspėjimai, heartbeat.
+4. Kartą per paleidimą – konfigūracijos bazė, veikianti CLIProxyAPI versija, įspėjimai, heartbeat. Naujausią
+   versiją tikrina atskiras cron'as (`app:cliproxy-update`, žr. „CLIProxyAPI atnaujinimas“).
 
 Rankiniu būdu – cron konteineryje (bendras lock'as): `docker exec -u "$(id -u)" -w /var/www/html
 cliproxy-<env>-cron php -d memory_limit=2G bin/console app:collect --quotas`.
@@ -210,7 +211,7 @@ cliproxy-<env>-cron php -d memory_limit=2G bin/console app:collect --quotas`.
 
 `src/Alert/AlertMonitor.php`, puslapis „Įspėjimai“ (skaičius šoninėje juostoje): paskyrai reikia prisijungti iš naujo,
 paskyros klaida, tiekėjas be nė vienos laisvos paskyros, CLIProxyAPI neatsako, usage nepavyko įrašyti, failai
-karantine, diske < 10 % vietos, nauja CLIProxyAPI versija. Kiekvienas įspėjimo pasikartojimas – atskiras epizodas,
+karantine, diske < 10 % vietos, nauja CLIProxyAPI versija (kaip sekasi jos atnaujinimas). Kiekvienas įspėjimo pasikartojimas – atskiras epizodas,
 ankstesni lieka. CLIProxyAPI neatsakant paskyrų įspėjimai neuždaromi (nežinoma ≠ gerai). Nustatymuose įrašius **ntfy**
 temos adresą (`https://ntfy.sh/<tema>`) kiekvienas naujas (ir išspręstas) klaidos ar dėmesio įspėjimas siunčiamas į
 telefoną; ntfy nepriėmus – bandoma kitą kartą.
@@ -317,6 +318,34 @@ atskirai (pvz. `rsync -a --ignore-existing` – tik pridedant).
 
 **Host'as.** Miego režimai užmaskuoti (`systemctl mask sleep.target suspend.target hibernate.target
 hybrid-sleep.target`), kaip reikalauja Theo gidas; atšaukti – `systemctl unmask …`.
+
+### CLIProxyAPI atnaujinimas
+
+Nauja Claude Code ar Codex versija dažnai veikia tik su nauja CLIProxyAPI, todėl hub'as ją ima pats:
+
+1. Hub'o cron'as (`app:cliproxy-update`, kas 10 min., `cliproxy-<env>-cron`) klausia GitHub
+   `router-for-me/CLIProxyAPI` naujausio release'o ir lygina su veikiančia versija. Kai Docker Hub'e atsiranda
+   `eceasy/cli-proxy-api:<versija>`, jis paleidžia workflow'ą **CLIProxyAPI update** – vieną kartą kiekvienai
+   versijai (`setting.cliproxy_update`); iš naujo bandoma tik tada, kai GitHub paleidimo nepriėmė.
+2. **CLIProxyAPI update** (`.github/workflows/cliproxy-update.yml`): versija turi būti naujesnė už master'io
+   `CLIPROXY_VERSION` (kitaip nieko nedaro) ir tos pačios pagrindinės versijos (v8). Image išbandomas atskirame
+   konteineryje (`.github/ci/cliproxy-image`: repo `entrypoint.sh` ir šablonas, tuščia būsena, be paskyrų; turi
+   atsakyti tuo numeriu ir į kolektoriaus kvietimus). Tada commit'as `CLIProxyAPI vX.Y.Z` į master ir Checks su
+   `deploy=<commit>`.
+3. Checks žali → jų `deploy` job'as paleidžia **Deploy** (jei master vis dar tas commit'as). Deploy, kaip visada:
+   CLIProxyAPI konteineris perkuriamas su nauju image, health, nepavykus – rollback.
+
+Tam reikia repo secret `PROD_CLIPROXY_UPDATE_TOKEN`: fine-grained token tik šiam repo, teisė **Actions: write** (jis
+tik paleidžia workflow'ą; commit'ą daro pats workflow). Jis pasiekia hub'ą per kitą Deploy (`CLIPROXY_UPDATE_TOKEN`,
+`APP_ENVIRONMENT`). Be jo nauja versija – tik įspėjimas (su ntfy), atnaujinti reikia pačiam.
+
+Įspėjimas „cliproxy:update“ rodo būseną: laukiama image (info), paleista (info), paleista prieš > 1 val., bet vis dar
+veikia senoji (dėmesio + ntfy), GitHub nepriėmė (dėmesio + ntfy), nauja pagrindinė versija ar nėra token'o (dėmesio
++ ntfy). Rankiniu būdu: Actions → **CLIProxyAPI update** → Run workflow su versija.
+
+Rollback (`IMAGES=auto`) grąžina tik kodą: jei nauja CLIProxyAPI veikia blogai, `git revert` tą commit'ą ir paleisk
+Deploy – `env/common.env` pasikeitimas vėl perkurs konteinerį su senu image. Perkuriant CLIProxyAPI nutrūksta
+vykstantys ryšiai, o jo atminties usage eilėje lieka tik tai, ko kolektorius dar nepaėmė (jis ima kas 5 s).
 
 ## Kai kas nors lūžta
 

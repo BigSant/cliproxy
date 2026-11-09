@@ -477,7 +477,12 @@ alert:
     usage_pending: 'Usage spool laukia pakartotinio įrašymo: %days%.'
     traffic_failed: 'Srauto žurnalas nesirenka: %error% (failai laukia logs/).'
     quarantine: '%count% request log''ų nepavyko perskaityti – jie cliproxy-traffic/quarantine/ su klaida šalia.'
-    update: 'Išleista CLIProxyAPI %latest% (veikia %version%). Atnaujinimas – CLIPROXY_VERSION env/common.env, išbandžius lokaliai.'
+    update: 'Išleista CLIProxyAPI %latest% (veikia %version%). Automatinis atnaujinimas išjungtas (nėra CLIPROXY_UPDATE_TOKEN): pakeisk CLIPROXY_VERSION env/common.env ir paleisk Deploy.'
+    update_major: 'Išleista CLIProxyAPI %latest% (veikia %version%) – nauja pagrindinė versija, jos hub''as pats neima: išbandyk lokaliai ir pakeisk CLIPROXY_VERSION env/common.env.'
+    update_waiting: 'Išleista CLIProxyAPI %latest% (veikia %version%). Laukiama jos Docker image – atsiradus atnaujinimas pasileis pats.'
+    update_requested: 'CLIProxyAPI %latest% atnaujinimas paleistas %at% (veikia %version%): GitHub Actions „CLIProxyAPI update“ → Checks → Deploy.'
+    update_stuck: 'CLIProxyAPI %latest% atnaujinimas paleistas %at%, bet vis dar veikia %version%: žr. GitHub Actions (CLIProxyAPI update, Checks, Deploy). Iš naujo – CLIProxyAPI update → Run workflow su versija %latest%.'
+    update_failed: 'CLIProxyAPI %latest% atnaujinimo paleisti nepavyko: %error%. Bandoma kas 10 min.'
     ntfy_resolved: 'Išspręsta: CLIProxy hub'
 
 watchdog:

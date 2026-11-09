@@ -28,7 +28,7 @@ use Symfony\Component\Lock\LockFactory;
 #[AsCommand(name: 'app:collect', description: 'Move CLIProxyAPI usage and request logs into the database, refresh limits, raise alerts')]
 class CollectCommand
 {
-    private const int LATEST_VERSION_SECONDS = 6 * 3600;
+    private const int UPDATE_STUCK_SECONDS = 3600;
 
     /** @var array<string, string> errors of this run, by step */
     private array $errors = [];
@@ -164,19 +164,12 @@ class CollectCommand
         }
     }
 
+    /** The running version; the newest release and the update are app:cliproxy-update's. */
     private function checkVersion(): void
     {
         $version = $this->client->version();
         if (null !== $version) {
             $this->settings->set(Settings::CLIPROXY_VERSION, $version);
-        }
-        $checked = $this->settings->instant(Settings::CLIPROXY_LATEST_CHECKED_AT);
-        if (null === $checked || $this->clock->now()->getTimestamp() - $checked->getTimestamp() >= self::LATEST_VERSION_SECONDS) {
-            $this->settings->markNow(Settings::CLIPROXY_LATEST_CHECKED_AT, $this->clock->now());
-            $latest = $this->client->latestVersion();
-            if (null !== $latest) {
-                $this->settings->set(Settings::CLIPROXY_LATEST, $latest);
-            }
         }
     }
 
@@ -230,8 +223,34 @@ class CollectCommand
         $version = $this->settings->get(Settings::CLIPROXY_VERSION);
         $latest = $this->settings->get(Settings::CLIPROXY_LATEST);
         if (\is_string($version) && \is_string($latest) && version_compare(ltrim($latest, 'v'), ltrim($version, 'v'), '>')) {
-            $conditions['cliproxy:update'] = ['level' => Alert::INFO, 'key' => 'alert.update', 'params' => ['%latest%' => $latest, '%version%' => $version]];
+            $conditions['cliproxy:update'] = $this->updateCondition($version, $latest);
         }
         $this->alerts->sync($conditions);
+    }
+
+    /**
+     * A newer release than the running one, as far as app:cliproxy-update took it. Each state is one alert episode's
+     * level and text: a person is pushed (ntfy) once, when the update needs them.
+     *
+     * @return array{level: string, key: string, params: array<string, string>}
+     */
+    private function updateCondition(string $version, string $latest): array
+    {
+        $update = (array) ($this->settings->get(Settings::CLIPROXY_UPDATE) ?? []);
+        $state = ($update['version'] ?? null) === $latest ? (string) ($update['state'] ?? '') : '';
+        $at = \is_string($update['at'] ?? null) ? new \DateTimeImmutable($update['at']) : null;
+        $params = ['%latest%' => $latest, '%version%' => $version, '%at%' => $at?->setTimezone($this->clock->now()->getTimezone())->format('Y-m-d H:i') ?? '', '%error%' => (string) ($update['error'] ?? '')];
+        // The workflow, the checks and the deploy take some ten minutes; an hour later something stopped them.
+        $stuck = null !== $at && $this->clock->now()->getTimestamp() - $at->getTimestamp() > self::UPDATE_STUCK_SECONDS;
+
+        return match ($state) {
+            CliProxyUpdateCommand::REQUESTED => $stuck
+                ? ['level' => Alert::WARNING, 'key' => 'alert.update_stuck', 'params' => $params]
+                : ['level' => Alert::INFO, 'key' => 'alert.update_requested', 'params' => $params],
+            CliProxyUpdateCommand::FAILED => ['level' => Alert::WARNING, 'key' => 'alert.update_failed', 'params' => $params],
+            CliProxyUpdateCommand::MANUAL => ['level' => Alert::WARNING, 'key' => 'alert.update', 'params' => $params],
+            CliProxyUpdateCommand::MAJOR => ['level' => Alert::WARNING, 'key' => 'alert.update_major', 'params' => $params],
+            default => ['level' => Alert::INFO, 'key' => 'alert.update_waiting', 'params' => $params],
+        };
     }
 }

@@ -194,14 +194,6 @@ class ManagementClient
         }
     }
 
-    /** The newest CLIProxyAPI release (it asks GitHub; call it seldom). */
-    public function latestVersion(): ?string
-    {
-        $latest = $this->json('GET', '/server/latest-version');
-
-        return \is_string($latest['latest-version'] ?? null) ? $latest['latest-version'] : null;
-    }
-
     /** Re-signs an account in place (same file, priority, note and history), instead of removing and adding it. */
     public function startRelogin(string $provider, string $name): array
     {

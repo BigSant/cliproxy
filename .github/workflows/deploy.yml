@@ -10,6 +10,10 @@ name: Deploy
 #   PROD_DATABASE_PASSWORD, PROD_DATABASE_ROOT_PASSWORD
 #   gh secret set PROD_APP_SECRET --repo BigSant/cliproxy   (value on stdin; never echoed)
 # PROD_CLIPROXY_API_KEY only seeds config.yaml on the very first start; later keys live in the hub (Nustatymai).
+# PROD_CLIPROXY_UPDATE_TOKEN (optional): the hub's cron starts cliproxy-update.yml with it (README, "CLIProxyAPI
+# atnaujinimas"); a fine-grained token for this repository with Actions: write only.
+#
+# Also started by checks.yml ("deploy") after the CLIProxyAPI update's checks pass.
 #
 # Every make here is setup's own project.mk, run with -f from the setup checkout beside the build root
 # ($RUNNER_TEMP/setup-make), never the build root's app/Makefile.
@@ -68,6 +72,7 @@ jobs:
           HUB_SECRET_ADMIN_PASSWORD: ${{ secrets.PROD_ADMIN_PASSWORD }}
           HUB_SECRET_CLIPROXY_MANAGEMENT_KEY: ${{ secrets.PROD_CLIPROXY_MANAGEMENT_KEY }}
           HUB_SECRET_CLIPROXY_API_KEY: ${{ secrets.PROD_CLIPROXY_API_KEY }}
+          HUB_SECRET_CLIPROXY_UPDATE_TOKEN: ${{ secrets.PROD_CLIPROXY_UPDATE_TOKEN }}
           HUB_SECRET_DATABASE_PASSWORD: ${{ secrets.PROD_DATABASE_PASSWORD }}
           HUB_SECRET_DATABASE_ROOT_PASSWORD: ${{ secrets.PROD_DATABASE_ROOT_PASSWORD }}
         run: &deploy |
@@ -101,6 +106,7 @@ jobs:
           HUB_SECRET_ADMIN_PASSWORD: ${{ secrets.PROD_ADMIN_PASSWORD }}
           HUB_SECRET_CLIPROXY_MANAGEMENT_KEY: ${{ secrets.PROD_CLIPROXY_MANAGEMENT_KEY }}
           HUB_SECRET_CLIPROXY_API_KEY: ${{ secrets.PROD_CLIPROXY_API_KEY }}
+          HUB_SECRET_CLIPROXY_UPDATE_TOKEN: ${{ secrets.PROD_CLIPROXY_UPDATE_TOKEN }}
           HUB_SECRET_DATABASE_PASSWORD: ${{ secrets.PROD_DATABASE_PASSWORD }}
           HUB_SECRET_DATABASE_ROOT_PASSWORD: ${{ secrets.PROD_DATABASE_ROOT_PASSWORD }}
         run: *deploy

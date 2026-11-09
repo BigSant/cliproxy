@@ -477,7 +477,12 @@ alert:
     usage_pending: 'The usage spool is waiting to be stored again: %days%.'
     traffic_failed: 'The traffic journal is not being collected: %error% (the files wait in logs/).'
     quarantine: '%count% request log could not be read – it is in cliproxy-traffic/quarantine/ with the error next to it.|%count% request logs could not be read – they are in cliproxy-traffic/quarantine/ with the error next to them.'
-    update: 'CLIProxyAPI %latest% is out (running %version%). To update: CLIPROXY_VERSION in env/common.env, after trying it locally.'
+    update: 'CLIProxyAPI %latest% is out (running %version%). Automatic updates are off (no CLIPROXY_UPDATE_TOKEN): change CLIPROXY_VERSION in env/common.env and run Deploy.'
+    update_major: 'CLIProxyAPI %latest% is out (running %version%) – a new major version, which the hub does not take by itself: try it locally and change CLIPROXY_VERSION in env/common.env.'
+    update_waiting: 'CLIProxyAPI %latest% is out (running %version%). Waiting for its Docker image – the update starts by itself once it is there.'
+    update_requested: 'The update to CLIProxyAPI %latest% started at %at% (running %version%): GitHub Actions "CLIProxyAPI update" → Checks → Deploy.'
+    update_stuck: 'The update to CLIProxyAPI %latest% started at %at%, but %version% still runs: see GitHub Actions (CLIProxyAPI update, Checks, Deploy). To try again: CLIProxyAPI update → Run workflow with version %latest%.'
+    update_failed: 'The update to CLIProxyAPI %latest% could not be started: %error%. Tried again every 10 min.'
     ntfy_resolved: 'Resolved: CLIProxy hub'
 
 watchdog:

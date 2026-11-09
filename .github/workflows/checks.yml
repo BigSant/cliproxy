@@ -14,11 +14,20 @@ name: Checks
 # the "reuse" job finds the branch's green phpunit, lint and release runs, and the three jobs here then pass at once,
 # so the deploy gate still sees all three green on master's commit.
 #
+# The CLIProxyAPI update (cliproxy-update.yml) starts them on master with deploy=<its commit>: the "deploy" job then
+# starts the deploy once all three are green, while master is still that commit.
+#
 # Needs: the self-hosted runner of setup-server (labels below). No secrets, no variables.
 on:
   push:
     branches: ['**']
   workflow_dispatch:
+    inputs:
+      deploy:
+        description: The commit to deploy when the checks pass (cliproxy-update.yml sets it)
+        required: false
+        default: ''
+        type: string
 permissions:
   contents: read
   checks: read
@@ -156,3 +165,22 @@ jobs:
             exit 0
           fi
           ci/.github/ci/release-build source
+  deploy:
+    needs: [phpunit, lint, release]
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master' && inputs.deploy == github.sha
+    runs-on: [self-hosted, linux, setup.build]
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - name: Start the deploy
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # deploy.yml deploys master's commit: only this one, whose checks just passed.
+          head=$(gh api "repos/$GITHUB_REPOSITORY/commits/master" --jq .sha)
+          [ "$head" = "$GITHUB_SHA" ] || { echo "::warning::master moved on to $head: deploy it by hand (Actions -> Deploy)"; exit 0; }
+          gh workflow run deploy.yml --repo "$GITHUB_REPOSITORY" --ref master
