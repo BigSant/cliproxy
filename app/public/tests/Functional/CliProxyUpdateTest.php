@@ -13,6 +13,7 @@ use Symfony\Bundle\FrameworkBundle\Console\Application;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
 use Symfony\Component\Clock\Clock;
 use Symfony\Component\Clock\MockClock;
+use Symfony\Component\Clock\NativeClock;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Tester\CommandTester;
 
@@ -37,7 +38,8 @@ class CliProxyUpdateTest extends KernelTestCase
 
     protected function tearDown(): void
     {
-        Clock::set(new MockClock('now'));
+        // The real clock again: a frozen one would stop time for the tests after this class.
+        Clock::set(new NativeClock());
         parent::tearDown();
     }
 
