@@ -6,6 +6,7 @@ use App\Chart\TimeChart;
 use App\CliProxy\Account;
 use App\CliProxy\ManagementClient;
 use App\CliProxy\ManagementException;
+use App\CliProxy\Providers;
 use App\Quota\PoolForecast;
 use App\Quota\QuotaWindow;
 use App\Repository\QuotaSnapshotRepository;
@@ -23,12 +24,15 @@ use Symfony\Contracts\Translation\TranslatorInterface;
  */
 class QuotaController extends AbstractController
 {
-    public const array PROVIDERS = ['claude' => 'Claude', 'codex' => 'Codex'];
+    public const array PROVIDERS = Providers::LABELS;
     /** The views and windows with their names' translation keys. */
     public const array VIEWS = ['remaining' => 'quota.view.remaining', 'drain' => 'quota.view.drain', 'accounts' => 'quota.view.accounts'];
     public const array BURN = [1, 3, 6];
-    public const array WINDOW_LABELS = [QuotaWindow::WEEK => 'window.7d', QuotaWindow::FIVE_HOUR => 'window.5h', QuotaWindow::WEEK_FABLE => 'window.7d-fable'];
-    public const array COLORS = ['claude' => '#e07a55', 'codex' => '#6f9cf7'];
+    public const array WINDOW_LABELS = [
+        QuotaWindow::WEEK => 'window.7d', QuotaWindow::FIVE_HOUR => 'window.5h', QuotaWindow::WEEK_FABLE => 'window.7d-fable',
+        QuotaWindow::AG_GEMINI => 'window.ag-gemini', QuotaWindow::AG_FLASH => 'window.ag-flash', QuotaWindow::AG_CLAUDE => 'window.ag-claude',
+    ];
+    public const array COLORS = ['claude' => '#e07a55', 'codex' => '#6f9cf7', 'antigravity' => '#4fb3a3'];
     private const array ACCOUNT_COLORS = ['#e07a55', '#6f9cf7', '#4fc08d', '#d9a83a', '#b07ce8', '#e86a9a', '#3fb8c9', '#a3a3a3'];
 
     #[Route('/quota', name: 'app_quota', methods: ['GET'])]
@@ -66,7 +70,7 @@ class QuotaController extends AbstractController
             if (('all' !== $provider && $key !== $provider) || ('all' === $provider && [] === $mine)) {
                 continue;
             }
-            $cardWindow = 'codex' === $key && QuotaWindow::WEEK_FABLE === $window ? QuotaWindow::WEEK : $window;
+            $cardWindow = self::cardWindow($key, $window);
             $forecast = PoolForecast::build($mine, $history, $cardWindow, $now->getTimestamp(), $from, $to, $burn);
             $cards[] = [
                 'key' => $key,
@@ -92,6 +96,20 @@ class QuotaController extends AbstractController
             'total' => \count($accounts),
             'quotaRefreshedAt' => $settings->instant(Settings::QUOTA_REFRESHED_AT),
         ]);
+    }
+
+    /**
+     * The window a provider's card shows for the chosen one: Antigravity has a quota per model family instead of 5 h /
+     * 7 d (Gemini Pro unless a family is chosen), the others show their week for a family; Codex has no Fable week.
+     */
+    public static function cardWindow(string $provider, string $window): string
+    {
+        $family = isset(QuotaWindow::ANTIGRAVITY[$window]);
+        if (Providers::ANTIGRAVITY === $provider) {
+            return $family ? $window : QuotaWindow::AG_GEMINI;
+        }
+
+        return $family || (Providers::CODEX === $provider && QuotaWindow::WEEK_FABLE === $window) ? QuotaWindow::WEEK : $window;
     }
 
     private static function chart(PoolForecast $forecast, string $view, string $provider, int $from, int $to, int $now, TranslatorInterface $translator): TimeChart

@@ -67,4 +67,14 @@ class PoolForecastTest extends TestCase
             new QuotaWindow(QuotaWindow::WEEK, '7 d.', $weekUsed, new \DateTimeImmutable('@'.(self::NOW + $resetIn))),
         ], 'live');
     }
+
+    public function testEachProviderCardShowsAWindowItHas(): void
+    {
+        self::assertSame(QuotaWindow::AG_GEMINI, \App\Controller\QuotaController::cardWindow('antigravity', QuotaWindow::WEEK));
+        self::assertSame(QuotaWindow::AG_FLASH, \App\Controller\QuotaController::cardWindow('antigravity', QuotaWindow::AG_FLASH));
+        self::assertSame(QuotaWindow::WEEK, \App\Controller\QuotaController::cardWindow('claude', QuotaWindow::AG_FLASH));
+        self::assertSame(QuotaWindow::WEEK, \App\Controller\QuotaController::cardWindow('codex', QuotaWindow::WEEK_FABLE));
+        self::assertSame(QuotaWindow::WEEK_FABLE, \App\Controller\QuotaController::cardWindow('claude', QuotaWindow::WEEK_FABLE));
+        self::assertSame(18000, PoolForecast::WINDOWS[QuotaWindow::AG_GEMINI]);
+    }
 }

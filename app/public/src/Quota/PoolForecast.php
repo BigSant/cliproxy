@@ -16,6 +16,10 @@ final class PoolForecast
         QuotaWindow::WEEK => 604800,
         QuotaWindow::FIVE_HOUR => 18000,
         QuotaWindow::WEEK_FABLE => 604800,
+        // Antigravity on Google AI Pro / Ultra: each model family's quota refreshes every five hours.
+        QuotaWindow::AG_GEMINI => 18000,
+        QuotaWindow::AG_FLASH => 18000,
+        QuotaWindow::AG_CLAUDE => 18000,
     ];
 
     /** @var list<array{t: int, v: float}> */

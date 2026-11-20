@@ -61,7 +61,7 @@ dalintis ekranu). Išdėstymas – pagal Theo gist'o kvotų puslapį.
 
 | Puslapis | Kas |
 | --- | --- |
-| Kvotos | Kiekvieno tiekėjo paskyros kaip vienas pool'as (kiekviena paskyra – 100 %): likutis „X % iš N×100 %“, grafikas „užfiksuota“ (iš limitų istorijos) ir „prognozė“ (punktyras) per dvi savaites su atsinaujinimų šuoliais (+X %), „Dabar“ linija; „Pool ištuštės“, „Pirma ištuštės“, „Kitas atsinaujinimas“, „Burn“ per 1/3/6 val. Rodiniai: likutis, sąnaudos (%/val.), paskyros atskirai; langai 7 d., 5 val., 7 d. Fable; savaitės perjungimas. |
+| Kvotos | Kiekvieno tiekėjo paskyros kaip vienas pool'as (kiekviena paskyra – 100 %): likutis „X % iš N×100 %“, grafikas „užfiksuota“ (iš limitų istorijos) ir „prognozė“ (punktyras) per dvi savaites su atsinaujinimų šuoliais (+X %), „Dabar“ linija; „Pool ištuštės“, „Pirma ištuštės“, „Kitas atsinaujinimas“, „Burn“ per 1/3/6 val. Rodiniai: likutis, sąnaudos (%/val.), paskyros atskirai; langai 7 d., 5 val., 7 d. Fable, o Antigravity – modelių šeimos (Gemini Pro, Gemini Flash, Claude / GPT; atsinaujina kas 5 val.; Claude ir Codex kortelės tada rodo 7 d.); savaitės perjungimas. |
 | Apžvalga | Paskyros su 5 val., 7 d. ir 7 d. Fable limitais (kiek panaudota, po kiek atsinaujina), 24 val. užklausos, tokenai, cache skaitymai/rašymai, session affinity, gyvas užklausų srautas (kas 5 s). |
 | Paskyros | Prijungti Claude / Codex / Antigravity paskyrą, įjungti/išjungti, prioritetas, svoris, Codex WebSocket'ai, pastaba, rakto atnaujinimas, patikra, pašalinimas. |
 | Naudojimas | 24 val. – visas laikas: per dieną, pagal paskyrą ir modelį; cache santykis; sesijos, peršokusios į kitą paskyrą. |
