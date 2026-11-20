@@ -22,6 +22,9 @@ final class PoolForecast
         QuotaWindow::AG_CLAUDE => 18000,
     ];
 
+    /** How far ahead the projection of a window shorter than a day is drawn. */
+    public const int SHORT_WINDOW_DRAWN = 86400;
+
     /** @var list<array{t: int, v: float}> */
     public array $recorded = [];
     /** @var list<array{t: int, v: float}> */
@@ -141,6 +144,9 @@ final class PoolForecast
         $soonest = min(array_column($state, 'reset'));
         $forecast->nextReset = ['t' => $soonest, 'gain' => 0.0];
         $horizon = max($to, $now + 14 * 86400);
+        // A window shorter than a day (5 h) would draw dozens of resets of a burn that never sleeps: a day of it is drawn,
+        // the rest only counts (when the pool runs empty).
+        $drawUntil = $windowSeconds < 86400 ? min($to, $now + self::SHORT_WINDOW_DRAWN) : $to;
         $projectStep = min($step, 900);
         for ($t = $now + $projectStep; $t <= $horizon; $t += $projectStep) {
             $gain = 0.0;
@@ -174,7 +180,7 @@ final class PoolForecast
             if ($pool <= 0.0001 && null === $forecast->poolEmptyAt && $forecast->burn > 0) {
                 $forecast->poolEmptyAt = $t;
             }
-            if ($t <= $to) {
+            if ($t <= $drawUntil) {
                 $forecast->projected[] = ['t' => $t, 'v' => $pool];
                 foreach ($state as $authIndex => $account) {
                     $forecast->accounts[$authIndex]['projected'][] = ['t' => $t, 'v' => $account['remaining']];

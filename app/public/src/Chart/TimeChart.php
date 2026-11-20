@@ -14,6 +14,8 @@ final class TimeChart
     private const int RIGHT = 14;
     private const int TOP = 30;
     private const int BOTTOM = 30;
+    /** The least distance between two marker labels, in the chart's width units ("+100%" is about 40 wide). */
+    public const int MARKER_GAP = 44;
 
     /** @var list<array{key: string, d: string, area: ?string, dashed: bool, color: string, label: string}> */
     public array $series = [];
@@ -57,11 +59,18 @@ final class TimeChart
         ];
     }
 
+    /** A labelled point; one closer than MARKER_GAP to the last one kept is left out, so labels never overlap. */
     public function mark(int $t, float $v, string $text): void
     {
-        if ($t >= $this->from && $t <= $this->to) {
-            $this->markers[] = ['x' => $this->x($t), 'y' => $this->y($v), 'text' => $text];
+        if ($t < $this->from || $t > $this->to) {
+            return;
         }
+        $x = $this->x($t);
+        $last = end($this->markers);
+        if (false !== $last && abs($x - $last['x']) < self::MARKER_GAP) {
+            return;
+        }
+        $this->markers[] = ['x' => $x, 'y' => $this->y($v), 'text' => $text];
     }
 
     public function x(int $t): float
