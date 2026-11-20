@@ -77,4 +77,33 @@ class PoolForecastTest extends TestCase
         self::assertSame(QuotaWindow::WEEK_FABLE, \App\Controller\QuotaController::cardWindow('claude', QuotaWindow::WEEK_FABLE));
         self::assertSame(18000, PoolForecast::WINDOWS[QuotaWindow::AG_GEMINI]);
     }
+
+    public function testAFiveHourWindowIsDrawnADayAheadButStillCountsToTheEnd(): void
+    {
+        $a = Account::fromArray(FakeCliProxy::credential('antigravity', 'a@x'));
+        $snapshot = static fn (int $ago, float $used) => new QuotaSnapshot('idx-a@x', 'a@x', 'antigravity', new \DateTimeImmutable('@'.(self::NOW + $ago)),
+            [new QuotaWindow(QuotaWindow::AG_GEMINI, 'Gemini Pro', $used, new \DateTimeImmutable('@'.(self::NOW + 3 * 3600)))], 'live');
+        $history = ['idx-a@x' => [$snapshot(-3 * 3600, 0), $snapshot(0, 10)]];
+
+        $forecast = PoolForecast::build([$a], $history, QuotaWindow::AG_GEMINI, self::NOW, self::NOW - 3 * 86400, self::NOW + 11 * 86400, 3);
+
+        self::assertLessThanOrEqual(self::NOW + PoolForecast::SHORT_WINDOW_DRAWN, end($forecast->projected)['t']);
+        self::assertLessThanOrEqual(self::NOW + PoolForecast::SHORT_WINDOW_DRAWN, end($forecast->resets)['t']);
+        self::assertCount(5, $forecast->resets, 'a reset every five hours over the day drawn');
+        self::assertNull($forecast->poolEmptyAt, '3.3 %/h never empties a window that comes back every five hours');
+    }
+
+    public function testMarkerLabelsNeverOverlap(): void
+    {
+        $chart = new \App\Chart\TimeChart(self::NOW, self::NOW + 14 * 86400, 100, '%', self::NOW, []);
+        for ($t = self::NOW; $t < self::NOW + 14 * 86400; $t += 5 * 3600) {
+            $chart->mark($t, 90, '+16%');
+        }
+
+        $xs = array_column($chart->markers, 'x');
+        self::assertGreaterThan(1, \count($xs));
+        for ($i = 1; $i < \count($xs); ++$i) {
+            self::assertGreaterThanOrEqual(\App\Chart\TimeChart::MARKER_GAP, $xs[$i] - $xs[$i - 1]);
+        }
+    }
 }
