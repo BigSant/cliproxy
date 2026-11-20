@@ -278,7 +278,7 @@ class Collector
      */
     public function refreshQuotas(): int
     {
-        $accounts = array_values(array_filter($this->client->accounts(), static fn ($account) => $account->isClaude() || $account->isCodex()));
+        $accounts = array_values(array_filter($this->client->accounts(), static fn ($account) => $account->isClaude() || $account->isCodex() || $account->isAntigravity()));
         $entityManager = $this->doctrine->getManager();
         $userAgents = $this->usage->latestUserAgents();
         $latest = $this->snapshots->latest();

@@ -85,6 +85,48 @@ class DashboardTest extends WebTestCase
         self::assertSame(1, self::getContainer()->get(EntityManagerInterface::class)->getRepository(UsageRecord::class)->count([]));
     }
 
+    public function testAnAntigravityAccountShowsItsModelFamiliesAndNeverTakesAClaudeModel(): void
+    {
+        $this->cliProxy->credentials = [
+            FakeCliProxy::credential('claude', 'me@example.com'),
+            FakeCliProxy::credential('antigravity', 'me@gmail.com', ['project_id' => 'proj-1', 'priority' => 7]),
+        ];
+        $this->cliProxy->models = [
+            'claude-me@example.com.json' => ['claude-sonnet-4-6', 'claude-opus-5-5'],
+            'antigravity-me@gmail.com.json' => ['claude-sonnet-4-6', 'claude-opus-4-6-thinking', 'gemini-4-argon-high'],
+        ];
+        $this->cliProxy->providerAnswers[QuotaFetcher::ANTIGRAVITY_MODELS_URLS[0]] = ['status_code' => 200, 'body' => json_encode(['models' => [
+            'gemini-4-argon-high' => ['quotaInfo' => ['remainingFraction' => 0.75, 'resetTime' => '2030-01-01T00:00:00Z']],
+            'gemini-3.8-flash-high' => ['quotaInfo' => ['remainingFraction' => 1, 'resetTime' => '2030-01-01T00:00:00Z']],
+            'claude-opus-4-6-thinking' => ['quotaInfo' => ['resetTime' => '2030-01-01T00:00:00Z']],
+        ]])];
+        self::getContainer()->get(\App\Settings\Settings::class)->set(\App\Settings\Settings::AUTO_PRIORITY, true);
+        self::getContainer()->get(Collector::class)->refreshQuotas();
+        self::getContainer()->get(\App\CliProxy\ConfigBaseline::class)->apply();
+        $this->logIn();
+
+        $call = array_values(array_filter($this->cliProxy->calls, static fn ($c) => 'POST /requests/api-call' === $c['method'].' '.$c['path'] && QuotaFetcher::ANTIGRAVITY_MODELS_URLS[0] === $c['body']['url']))[0];
+        self::assertSame(['POST', '{"project":"proj-1"}'], [$call['body']['method'], $call['body']['data']]);
+        self::assertSame(['claude-sonnet-4-6'], $this->cliProxy->config['oauth']['excluded-models']['antigravity']);
+        $patched = array_column(array_filter($this->cliProxy->calls, static fn ($c) => 'PATCH /credentials/fields' === $c['method'].' '.$c['path']), 'body');
+        self::assertNotSame([], $patched, 'soonest-reset-first ran');
+        self::assertSame([], array_filter($patched, static fn ($b) => 'antigravity-me@gmail.com.json' === ($b['name'] ?? null)), 'and left Antigravity alone');
+
+        $crawler = $this->browser->request('GET', '/');
+        self::assertResponseIsSuccessful();
+        $row = $crawler->filter('table.accounts tbody tr')->reduce(fn ($tr) => str_contains($tr->text(), 'me@gmail.com'));
+        self::assertStringContainsString('Antigravity', $row->text());
+        self::assertStringContainsString('Gemini Pro', $row->text());
+        self::assertSame(['25%', '0%', '100%'], $row->filter('.quota-value')->each(fn ($n) => $n->text()));
+
+        $this->browser->request('GET', '/accounts');
+        self::assertSelectorTextContains('.provider-buttons', 'Antigravity');
+        $this->browser->request('GET', '/connect');
+        self::assertResponseIsSuccessful();
+        // The copy buttons hold the whole text, quotes and all.
+        self::assertStringContainsString('data-copy="curl -s http://127.0.0.1:8317/v1/models -H &quot;Authorization: Bearer key-one&quot; | jq -r &#039;.data[] | select(.owned_by == &quot;antigravity&quot;) | .id&#039;', (string) $this->browser->getResponse()->getContent());
+    }
+
     public function testFiveMinuteCacheWritesAreFlaggedAndTheFixIsOnTheConnectPage(): void
     {
         $this->cliProxy->queue = [['timestamp' => (new \DateTimeImmutable())->format(\DATE_ATOM), 'provider' => 'claude',

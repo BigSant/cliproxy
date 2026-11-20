@@ -20,6 +20,8 @@ class SoonestResetPrioritizerTest extends TestCase
             Account::fromArray(FakeCliProxy::credential('claude', 'unknown@x')),
             Account::fromArray(FakeCliProxy::credential('claude', 'off@x', ['disabled' => true])),
             Account::fromArray(FakeCliProxy::credential('codex', 'only@x')),
+            // A quota per model family: its priority stays the person's.
+            Account::fromArray(FakeCliProxy::credential('antigravity', 'google@x')),
         ];
         $snapshots = [
             'idx-later@x' => self::snapshot('idx-later@x', 10, '2026-11-14T08:00:00Z'),

@@ -36,6 +36,9 @@ window:
     7d-fable: '7 d. Fable'
     7d-opus: '7 d. Opus'
     7d-sonnet: '7 d. Sonnet'
+    ag-gemini: 'Gemini Pro'
+    ag-flash: 'Gemini Flash'
+    ag-claude: 'Claude / GPT'
 
 range:
     24h: '24 val.'
@@ -446,6 +449,9 @@ connect:
     t3_double_html: '<strong>T3 Code: dvigubi usage įrašai.</strong> Jei T3 Code rodo naudojimą dvigubai, nustatyk <code>requires_openai_auth = true</code> po <code>[model_providers.cliproxy]</code>. Tam reikia vietinio ChatGPT prisijungimo ta paskyra, kuri yra hub''e; užklausos vis tiek eina per hub''ą su šiuo raktu.'
     t3_double_source: 'Šaltinis: gist''o komentaras (mmmattG, CLIProxyAPI 8.0.45), nepatikrinta.'
     check: 'Patikrinimas'
+    antigravity_models: 'Google paskyros modeliai'
+    antigravity_intro_html: 'Antigravity paskyros (Paskyros → „+ Antigravity paskyra“) duoda Gemini modelius ir Google''o Claude / GPT-OSS kvotą tuo pačiu hub''o adresu ir raktu: <code>/v1/messages</code> (Claude Code), <code>/v1/responses</code> ir <code>/v1/chat/completions</code>, <code>/v1beta</code> (Gemini). Modelio pavadinimą imk iš sąrašo – jis keičiasi.'
+    antigravity_note_html: '<strong>Pačios Antigravity programos per hub''ą nenukreipsi</strong> – ji jungiasi savo Google prisijungimu. Claude modeliai, kuriuos turi ir Claude paskyros (pvz. <code>claude-sonnet-4-6</code>), Antigravity paskyroms išjungiami automatiškai (<code>oauth.excluded-models.antigravity</code>), kad Claude Code užklausa nepakliūtų į Google paskyrą. Gemini CLI eilutė nepatikrinta.'
 
 alerts:
     open_count: '%count% aktyvūs'

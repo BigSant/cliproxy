@@ -3,7 +3,8 @@
 namespace App\CliProxy;
 
 /**
- * One signed-in subscription (a CLIProxyAPI credential file): a Claude or Codex account the hub routes requests to.
+ * One signed-in subscription (a CLIProxyAPI credential file): a Claude, Codex or Antigravity account the hub routes
+ * requests to.
  * Built from an entry of GET /v8/management/credentials.
  */
 final readonly class Account
@@ -36,6 +37,8 @@ final readonly class Account
         /** When CLIProxyAPI saw $signals (the answer that carried them). */
         public ?\DateTimeImmutable $signalsObservedAt = null,
         public bool $quotaBlocked = false,
+        /** Antigravity: the Cloud Code project the account's quota is read for. */
+        public ?string $projectId = null,
     ) {
     }
 
@@ -83,6 +86,7 @@ final readonly class Account
             requiresSignIn: (bool) ($file['requires_sign_in'] ?? false),
             signalsObservedAt: self::date($file['quota']['observed_at'] ?? null),
             quotaBlocked: (bool) ($file['quota_blocked'] ?? false),
+            projectId: isset($file['project_id']) && '' !== $file['project_id'] ? (string) $file['project_id'] : null,
         );
     }
 
@@ -93,12 +97,17 @@ final readonly class Account
 
     public function isClaude(): bool
     {
-        return 'claude' === $this->provider;
+        return Providers::CLAUDE === $this->provider;
     }
 
     public function isCodex(): bool
     {
-        return 'codex' === $this->provider;
+        return Providers::CODEX === $this->provider;
+    }
+
+    public function isAntigravity(): bool
+    {
+        return Providers::ANTIGRAVITY === $this->provider;
     }
 
     private static function date(mixed $value): ?\DateTimeImmutable

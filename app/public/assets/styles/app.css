@@ -15,6 +15,7 @@
     --primary-text: #111113;
     --claude: #e07a55;
     --codex: #6f9cf7;
+    --antigravity: #4fb3a3;
     --ok: #4fc08d;
     --warn: #e0a83a;
     --bad: #ef5d55;
@@ -152,6 +153,7 @@ code { background: var(--surface-2); padding: .1em .38em; border-radius: 6px; ov
 .provider-dot { width: .6rem; height: .6rem; border-radius: 50%; background: var(--muted); display: inline-block; }
 .provider-dot.provider-claude { background: var(--claude); }
 .provider-dot.provider-codex { background: var(--codex); }
+.provider-dot.provider-antigravity { background: var(--antigravity); }
 .toolbar { display: flex; flex-wrap: wrap; gap: .6rem; align-items: center; margin-bottom: 1.2rem; }
 .toolbar-label { color: var(--muted); font-size: .9rem; margin-left: .4rem; }
 .range-nav { margin-left: auto; display: flex; align-items: center; gap: .3rem; }
@@ -222,6 +224,7 @@ table.traffic .excerpt { max-width: 560px; overflow-wrap: anywhere; }
 .provider::before { content: ""; width: .55rem; height: .55rem; border-radius: 50%; background: var(--muted); flex: none; }
 .provider-claude::before { background: var(--claude); }
 .provider-codex::before { background: var(--codex); }
+.provider-antigravity::before { background: var(--antigravity); }
 td .provider, h1 .provider { font-weight: 500; font-size: .92rem; }
 h1 .provider { font-size: 1.5rem; font-weight: 650; }
 .tag { font-size: .72rem; padding: .08rem .5rem; border-radius: 999px; background: var(--surface-3); color: var(--muted); white-space: nowrap; font-weight: 500; }

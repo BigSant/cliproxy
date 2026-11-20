@@ -8,6 +8,11 @@ final readonly class QuotaWindow
     public const string FIVE_HOUR = '5h';
     public const string WEEK = '7d';
     public const string WEEK_FABLE = '7d-fable';
+    /** Antigravity's model families, each with its own quota and reset. */
+    public const string AG_GEMINI = 'ag-gemini';
+    public const string AG_FLASH = 'ag-flash';
+    public const string AG_CLAUDE = 'ag-claude';
+    public const array ANTIGRAVITY = [self::AG_GEMINI => 'Gemini Pro', self::AG_FLASH => 'Gemini Flash', self::AG_CLAUDE => 'Claude / GPT'];
 
     public function __construct(
         public string $key,

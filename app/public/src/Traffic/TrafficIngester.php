@@ -2,6 +2,7 @@
 
 namespace App\Traffic;
 
+use App\CliProxy\Providers;
 use App\Entity\Exchange;
 use App\Entity\ToolCall;
 use App\Entity\UsageRecord;
@@ -679,6 +680,10 @@ class TrafficIngester
         $websocket = str_ends_with($exchange->endpoint, '(ws)');
         $exchange->authIndex = $usage->authIndex;
         $exchange->account = $usage->account;
+        // The log tells the client's format (/v1/messages is "claude"); a Google account behind it is Antigravity.
+        if (Providers::ANTIGRAVITY === $usage->provider) {
+            $exchange->provider = Providers::ANTIGRAVITY;
+        }
         if ('' === $exchange->sessionId) {
             $exchange->sessionId = $usage->sessionId;
         }

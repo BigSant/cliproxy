@@ -86,4 +86,29 @@ class QuotaFetcherTest extends TestCase
         self::assertSame(QuotaWindow::WEEK, $windows[0]->key);
         self::assertSame(64.0, $windows[0]->used);
     }
+
+    public function testAntigravityGivesOneWindowPerModelFamilyAsUsedAsItsMostUsedModel(): void
+    {
+        $windows = QuotaFetcher::antigravityWindows(['models' => [
+            'gemini-4-argon-high' => ['quotaInfo' => ['remainingFraction' => 0.8, 'resetTime' => '2026-11-20T23:00:00Z']],
+            'gemini-4-neon-xhigh' => ['quotaInfo' => ['remainingFraction' => 0.6, 'resetTime' => '2026-11-20T23:30:00Z']],
+            'gemini-3.8-flash-high' => ['quotaInfo' => ['remainingFraction' => 1, 'resetTime' => '2026-11-21T01:00:00Z']],
+            // Used up: a reset, no remaining fraction.
+            'claude-opus-4-6-thinking' => ['quotaInfo' => ['resetTime' => '2026-11-21T02:00:00Z']],
+            'gpt-oss-120b-medium' => ['quotaInfo' => ['remainingFraction' => 0.5, 'resetTime' => '2026-11-21T02:00:00Z']],
+            // Pools of their own, or Google's internal models: left out.
+            'gemini-3.1-flash-image' => ['quotaInfo' => ['remainingFraction' => 0]],
+            'gemini-3.1-flash-lite' => ['quotaInfo' => ['remainingFraction' => 0]],
+            'chat_20706' => ['quotaInfo' => ['remainingFraction' => 0]],
+            'gemini-3-flash' => ['displayName' => 'no quota info'],
+        ]]);
+
+        self::assertSame([
+            [QuotaWindow::AG_GEMINI, 40.0, '2026-11-20T23:30:00+00:00'],
+            [QuotaWindow::AG_FLASH, 0.0, '2026-11-21T01:00:00+00:00'],
+            [QuotaWindow::AG_CLAUDE, 100.0, '2026-11-21T02:00:00+00:00'],
+        ], array_map(static fn ($w) => [$w->key, $w->used, $w->resetsAt?->format(\DATE_ATOM)], $windows));
+        self::assertTrue($windows[2]->isExhausted());
+        self::assertSame([], QuotaFetcher::antigravityWindows(['models' => []]));
+    }
 }

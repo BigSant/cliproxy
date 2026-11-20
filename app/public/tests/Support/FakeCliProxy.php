@@ -40,6 +40,8 @@ class FakeCliProxy
     public bool $verified = true;
     /** The last config.yaml saved through PUT. */
     public ?string $savedYaml = null;
+    /** @var array<string, list<string>> the model ids each credential serves, by name */
+    public array $models = [];
 
     public function __invoke(string $method, string $url, array $options = []): ResponseInterface
     {
@@ -73,6 +75,7 @@ class FakeCliProxy
 
         return match ("$method $path") {
             'GET /credentials' => $this->json(['files' => $this->credentials]),
+            'GET /credentials/models' => $this->json(['models' => array_map(static fn (string $id) => ['id' => $id], $this->models[$query['name'] ?? ''] ?? [])]),
             'GET /observability/usage/queue' => $this->json($this->take((int) ($query['count'] ?? 1))),
             'POST /requests/api-call' => $this->json($this->providerAnswers[$body['url'] ?? ''] ?? ['status_code' => 500, 'body' => '']),
             'PATCH /credentials/fields' => $this->patchCredential($body),

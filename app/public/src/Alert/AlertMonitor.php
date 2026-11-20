@@ -3,6 +3,7 @@
 namespace App\Alert;
 
 use App\CliProxy\Account;
+use App\CliProxy\Providers;
 use App\Entity\Alert;
 use App\Entity\QuotaSnapshot;
 use App\Quota\QuotaWindow;
@@ -116,6 +117,11 @@ class AlertMonitor
             }
             $snapshot = $snapshots[$account->authIndex] ?? null;
             $exhausted = $account->quotaBlocked;
+            if ($account->isAntigravity()) {
+                // A quota per model family: the account is out only when every family it has is.
+                $families = array_filter(array_map(static fn (string $key) => $snapshot?->window($key), array_keys(QuotaWindow::ANTIGRAVITY)));
+                $exhausted = $exhausted || ([] !== $families && [] === array_filter($families, static fn (QuotaWindow $window) => !$window->isExhausted($now)));
+            }
             foreach ([QuotaWindow::FIVE_HOUR, QuotaWindow::WEEK] as $key) {
                 $exhausted = $exhausted || (bool) $snapshot?->window($key)?->isExhausted($now);
             }
@@ -125,7 +131,7 @@ class AlertMonitor
         }
         foreach ($usable as $provider => $count) {
             if (0 === $count) {
-                $conditions['pool:'.$provider] = ['level' => Alert::ERROR, 'key' => 'alert.pool_empty', 'params' => ['%provider%' => 'claude' === $provider ? 'Claude' : ('codex' === $provider ? 'Codex' : $provider)]];
+                $conditions['pool:'.$provider] = ['level' => Alert::ERROR, 'key' => 'alert.pool_empty', 'params' => ['%provider%' => Providers::label($provider)]];
             }
         }
 

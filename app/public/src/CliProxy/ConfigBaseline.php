@@ -11,7 +11,8 @@ use App\Settings\Settings;
  * - ALWAYS: the data policy – usage records queued for the collector, log files never deleted by CLIProxyAPI;
  * - ONCE (then the person's own choice in Nustatymai or config.yaml): a session moves to another account only when its
  *   own account runs out of quota, and a Claude model's quota cools down only that model, not the whole account;
- * - the Claude Code version CLIProxyAPI presents, kept at the newest client the hub has seen (ClaudeCodeVersion).
+ * - the Claude Code version CLIProxyAPI presents, kept at the newest client the hub has seen (ClaudeCodeVersion);
+ * - Antigravity never answers for a model id a Claude account serves (shadowedByAntigravity).
  */
 class ConfigBaseline
 {
@@ -51,6 +52,10 @@ class ConfigBaseline
         if (null !== $agent) {
             $patch = array_replace_recursive($patch, ['upstream' => ['claude' => ['header-defaults' => ['user-agent' => $agent]]]]);
         }
+        $excluded = $this->antigravityExclusions($config);
+        if (null !== $excluded) {
+            $patch = array_replace_recursive($patch, ['oauth' => ['excluded-models' => ['antigravity' => $excluded]]]);
+        }
         if ([] !== $patch) {
             $this->client->patchConfig($patch);
         }
@@ -59,6 +64,55 @@ class ConfigBaseline
         }
 
         return [] !== $patch;
+    }
+
+    /**
+     * Antigravity serves some Claude models under the very ids the Claude accounts serve (claude-sonnet-4-6), and for
+     * an id more providers have CLIProxyAPI picks among all their accounts by priority: a Claude Code request could
+     * go to a Google account. Those ids are excluded from Antigravity (oauth.excluded-models.antigravity); its own
+     * Claude ids (claude-opus-4-6-thinking, …) stay. The list only grows: an excluded id no longer shows in
+     * Antigravity's models, so it cannot be told apart from one that went away.
+     *
+     * @param array<string, mixed> $config
+     *
+     * @return ?list<string> the whole new list, or null when nothing is to add
+     */
+    private function antigravityExclusions(array $config): ?array
+    {
+        $accounts = $this->client->accounts();
+        $claude = array_values(array_filter($accounts, static fn (Account $a) => $a->isClaude()));
+        $antigravity = array_filter($accounts, static fn (Account $a) => $a->isAntigravity());
+        if ([] === $claude || [] === $antigravity) {
+            return null;
+        }
+        $theirs = [];
+        foreach ($antigravity as $account) {
+            array_push($theirs, ...$this->client->credentialModels($account->name));
+        }
+        $current = $config['oauth']['excluded-models']['antigravity'] ?? [];
+
+        return self::shadowedByAntigravity(\is_array($current) ? $current : [], $this->client->credentialModels($claude[0]->name), $theirs);
+    }
+
+    /**
+     * @param list<mixed>  $current     oauth.excluded-models.antigravity now
+     * @param list<string> $claude      a Claude account's model ids
+     * @param list<string> $antigravity the Antigravity accounts' model ids
+     *
+     * @return ?list<string> $current with the shared ids added, or null when it has them all
+     */
+    public static function shadowedByAntigravity(array $current, array $claude, array $antigravity): ?array
+    {
+        $current = array_values(array_filter($current, 'is_string'));
+        $known = array_map('strtolower', $current);
+        $shared = array_values(array_unique(array_intersect(array_map('strtolower', $antigravity), array_map('strtolower', $claude))));
+        $new = array_values(array_diff($shared, $known));
+        if ([] === $new) {
+            return null;
+        }
+        sort($new);
+
+        return [...$current, ...$new];
     }
 
     /**

@@ -4,6 +4,7 @@ namespace App\Routing;
 
 use App\CliProxy\Account;
 use App\CliProxy\ManagementClient;
+use App\CliProxy\Providers;
 use App\Entity\QuotaSnapshot;
 use App\Quota\QuotaWindow;
 
@@ -11,7 +12,9 @@ use App\Quota\QuotaWindow;
  * Soonest-reset-first routing without a CLIProxyAPI fork. CLIProxyAPI serves a request from the accounts of the
  * highest priority first; this gives the highest priority to the account whose weekly limit resets soonest, so its
  * tokens are spent before they expire, and the lowest to accounts whose 5-hour or weekly limit is used up. Session
- * affinity still keeps a running session on its account.
+ * affinity still keeps a running session on its account. Only the 5-hour/weekly subscriptions (Claude, Codex):
+ * Antigravity's quota is per model family, which CLIProxyAPI cools down per model by itself, so its priorities stay
+ * the person's.
  */
 class SoonestResetPrioritizer
 {
@@ -53,7 +56,7 @@ class SoonestResetPrioritizer
     {
         $byProvider = [];
         foreach ($accounts as $account) {
-            if (!$account->disabled) {
+            if (!$account->disabled && \in_array($account->provider, Providers::WINDOWED, true)) {
                 $byProvider[$account->provider][] = $account;
             }
         }
