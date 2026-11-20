@@ -18,7 +18,7 @@
   "promptCacheTtl": "1h"
 }{% endset %}
         <pre class="code"><code>{{ claude }}</code></pre>
-        <button type="button" class="button" data-copy="{{ claude }}">{{ 'common.copy'|trans }}</button>
+        <button type="button" class="button" data-copy="{{ claude|e }}">{{ 'common.copy'|trans }}</button>
         <div class="note-box">
             {{ 'connect.cache_ttl_html'|trans|raw }}
             <span class="muted">{{ 'connect.cache_ttl_source_html'|trans|raw }}</span>
@@ -38,7 +38,7 @@ requires_openai_auth = false
 supports_websockets = true
 experimental_bearer_token = "{{ key_text }}"{% endset %}
         <pre class="code"><code>{{ codex }}</code></pre>
-        <button type="button" class="button" data-copy="{{ codex }}">{{ 'common.copy'|trans }}</button>
+        <button type="button" class="button" data-copy="{{ codex|e }}">{{ 'common.copy'|trans }}</button>
         <p class="muted small">{{ 'connect.codex_separate_html'|trans|raw }}</p>
         <div class="note-box">
             {{ 'connect.t3_double_html'|trans|raw }}
@@ -47,9 +47,24 @@ experimental_bearer_token = "{{ key_text }}"{% endset %}
     </section>
 
     <section class="card">
+        <div class="card-head"><h2>Antigravity (Gemini)</h2><span class="muted small">{{ 'connect.antigravity_models'|trans }}</span></div>
+        <p>{{ 'connect.antigravity_intro_html'|trans|raw }}</p>
+        {% set antigravity %}curl -s {{ url }}/v1/models -H "Authorization: Bearer {{ key_text }}" | jq -r '.data[] | select(.owned_by == "antigravity") | .id'
+
+# Claude Code, one session on a Gemini model
+claude --model gemini-4-argon-high
+
+# Gemini CLI
+GOOGLE_GEMINI_BASE_URL={{ url }} GEMINI_API_KEY={{ key_text }} gemini -m gemini-4-argon-high{% endset %}
+        <pre class="code"><code>{{ antigravity }}</code></pre>
+        <button type="button" class="button" data-copy="{{ antigravity|e }}">{{ 'common.copy'|trans }}</button>
+        <div class="note-box">{{ 'connect.antigravity_note_html'|trans|raw }}</div>
+    </section>
+
+    <section class="card">
         <div class="card-head"><h2>{{ 'connect.check'|trans }}</h2></div>
         {% set check %}curl -s {{ url }}/v1/models -H "Authorization: Bearer {{ key_text }}" | head -c 300{% endset %}
         <pre class="code"><code>{{ check }}</code></pre>
-        <button type="button" class="button" data-copy="{{ check }}">{{ 'common.copy'|trans }}</button>
+        <button type="button" class="button" data-copy="{{ check|e }}">{{ 'common.copy'|trans }}</button>
     </section>
 {% endblock %}

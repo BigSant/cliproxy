@@ -57,9 +57,16 @@
                         {% for row in rows %}
                             <tr class="{{ row.account.disabled ? 'is-off' }}">
                                 <td>{% include '_parts/account_cell.html.twig' %}</td>
-                                <td>{% include '_parts/quota.html.twig' with {window: row.windows['5h'] ?? null} %}</td>
-                                <td>{% include '_parts/quota.html.twig' with {window: row.windows['7d'] ?? null} %}</td>
-                                <td>{% include '_parts/quota.html.twig' with {window: row.windows['7d-fable'] ?? null} %}</td>
+                                {% if row.account.provider == 'antigravity' %}
+                                    {# A quota per model family, not 5 h / 7 d: the three columns hold the families, named. #}
+                                    {% for key in ['ag-gemini', 'ag-flash', 'ag-claude'] %}
+                                        <td>{% if row.windows[key] is defined %}<span class="muted small">{{ row.windows[key]|window_label }}</span>{% endif %}{% include '_parts/quota.html.twig' with {window: row.windows[key] ?? null} %}</td>
+                                    {% endfor %}
+                                {% else %}
+                                    <td>{% include '_parts/quota.html.twig' with {window: row.windows['5h'] ?? null} %}</td>
+                                    <td>{% include '_parts/quota.html.twig' with {window: row.windows['7d'] ?? null} %}</td>
+                                    <td>{% include '_parts/quota.html.twig' with {window: row.windows['7d-fable'] ?? null} %}</td>
+                                {% endif %}
                                 <td class="num">{{ row.account.success }}{% if row.account.failed %} <span class="bad">/ {{ row.account.failed }}</span>{% endif %}</td>
                             </tr>
                         {% endfor %}

@@ -20,7 +20,7 @@
                     </div>
                 </li>
                 <li>
-                    <strong>{{ 'accounts.login.ends_at'|trans }} <code>{{ login.provider == 'claude' ? 'http://localhost:54545/callback?…' : 'http://localhost:1455/auth/callback?…' }}</code></strong>{{ 'accounts.login.paste'|trans }}
+                    <strong>{{ 'accounts.login.ends_at'|trans }} <code>{{ {claude: 'http://localhost:54545/callback?…', codex: 'http://localhost:1455/auth/callback?…', antigravity: 'http://localhost:51121/oauth-callback?…'}[login.provider] ?? 'http://localhost:…' }}</code></strong>{{ 'accounts.login.paste'|trans }}
                     <form method="post" action="{{ path('app_accounts_login_callback') }}" class="inline-form">
                         <input type="hidden" name="_token" value="{{ csrf_token('accounts') }}">
                         <input type="url" name="redirect_url" placeholder="http://localhost:…/callback?code=…&amp;state=…" required>
@@ -60,7 +60,7 @@
                 <summary>
                     {% include '_parts/account_cell.html.twig' %}
                     <div class="account-quotas">
-                        {% for key in ['5h', '7d', '7d-fable'] %}
+                        {% for key in ['5h', '7d', '7d-fable', 'ag-gemini', 'ag-flash', 'ag-claude'] %}
                             {% if row.windows[key] is defined %}
                                 <div><span class="muted small">{{ row.windows[key]|window_label }}</span>{% include '_parts/quota.html.twig' with {window: row.windows[key]} %}</div>
                             {% endif %}

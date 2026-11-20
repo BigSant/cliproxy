@@ -59,4 +59,15 @@ class ConfigBaselineTest extends TestCase
         self::assertStringNotContainsString('secret', $masked);
         self::assertSame($yaml, SettingsController::unmaskKeys($masked, ['secret-one', 'secret-two']));
     }
+
+    public function testAntigravityLosesOnlyTheModelIdsAClaudeAccountServesAndTheListOnlyGrows(): void
+    {
+        $claude = ['claude-sonnet-4-6', 'claude-opus-5-5', 'claude-haiku-5-5'];
+        $antigravity = ['claude-sonnet-4-6', 'claude-opus-4-6-thinking', 'gemini-4-argon-high'];
+
+        self::assertSame(['claude-sonnet-4-6'], ConfigBaseline::shadowedByAntigravity([], $claude, $antigravity));
+        self::assertSame(['gemini-3-pro-preview', 'claude-sonnet-4-6'], ConfigBaseline::shadowedByAntigravity(['gemini-3-pro-preview'], $claude, $antigravity), 'the person\'s own exclusions stay first');
+        self::assertNull(ConfigBaseline::shadowedByAntigravity(['Claude-Sonnet-4-6'], $claude, $antigravity), 'already excluded');
+        self::assertNull(ConfigBaseline::shadowedByAntigravity([], $claude, ['gemini-4-argon-high']));
+    }
 }

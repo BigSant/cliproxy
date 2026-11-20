@@ -4,7 +4,7 @@ Visos Claude ir Codex prenumeratos prijungiamos **viename** visada įjungtame na
 `cachyos-x8664`, Telia – gyvenamasis IP). Jame veikia [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI):
 jis palaiko paskyrų raktus gyvus ir duoda vieną API adresą, kuriuo naudojasi Claude Code ir Codex. Šalia – savas
 valdymo skydelis (Symfony): paskyros ir jų 5 val. / savaitės limitai, naudojimas, cache, session affinity,
-soonest-reset-first prioritetai.
+soonest-reset-first prioritetai. Taip pat Google **Antigravity** paskyros – Gemini modeliai (žr. „Antigravity (Gemini)“).
 
 Pagal Theo gidą: <https://gist.github.com/t3dotgg/59a521d2ee8d70aaf90e280c175072af>
 (vaizdo įrašas <https://www.youtube.com/watch?v=D8PikZ1KhUo>).
@@ -63,7 +63,7 @@ dalintis ekranu). Išdėstymas – pagal Theo gist'o kvotų puslapį.
 | --- | --- |
 | Kvotos | Kiekvieno tiekėjo paskyros kaip vienas pool'as (kiekviena paskyra – 100 %): likutis „X % iš N×100 %“, grafikas „užfiksuota“ (iš limitų istorijos) ir „prognozė“ (punktyras) per dvi savaites su atsinaujinimų šuoliais (+X %), „Dabar“ linija; „Pool ištuštės“, „Pirma ištuštės“, „Kitas atsinaujinimas“, „Burn“ per 1/3/6 val. Rodiniai: likutis, sąnaudos (%/val.), paskyros atskirai; langai 7 d., 5 val., 7 d. Fable; savaitės perjungimas. |
 | Apžvalga | Paskyros su 5 val., 7 d. ir 7 d. Fable limitais (kiek panaudota, po kiek atsinaujina), 24 val. užklausos, tokenai, cache skaitymai/rašymai, session affinity, gyvas užklausų srautas (kas 5 s). |
-| Paskyros | Prijungti Claude / Codex paskyrą, įjungti/išjungti, prioritetas, svoris, Codex WebSocket'ai, pastaba, rakto atnaujinimas, patikra, pašalinimas. |
+| Paskyros | Prijungti Claude / Codex / Antigravity paskyrą, įjungti/išjungti, prioritetas, svoris, Codex WebSocket'ai, pastaba, rakto atnaujinimas, patikra, pašalinimas. |
 | Naudojimas | 24 val. – visas laikas: per dieną, pagal paskyrą ir modelį; cache santykis; sesijos, peršokusios į kitą paskyrą. |
 | Nustatymai | Strategija, session affinity, pakartojimai; soonest-reset-first; klientų raktai; visas `config.yaml`. |
 | Žurnalas | Kiekviena užklausa: įvestis (žmogaus prompt'as ar įrankių rezultatai), mąstymas, atsakymas, įrankių kvietimai su rezultatu (pavyko / klaida), tokenai, trukmė, HTTP būsena. Filtrai, paieška, žalio log'o atsisiuntimas, JSONL eksportas. |
@@ -76,7 +76,8 @@ Prisijungimas – vartotojas `admin`, slaptažodis `ADMIN_PASSWORD`.
 ### Paskyros prijungimas
 
 Paskyros → „+ Claude paskyra“ (ar Codex) → „Atidaryti“: prisijungi **savo naršyklėje**. Pabaigoje naršyklė atsidaro
-`http://localhost:54545/callback?…` (Codex – `localhost:1455/auth/callback?…`) ir **neužsikrauna – taip ir turi
+`http://localhost:54545/callback?…` (Codex – `localhost:1455/auth/callback?…`, Antigravity –
+`localhost:51121/oauth-callback?…`) ir **neužsikrauna – taip ir turi
 būti**. Visą adresą įklijuok į laukelį ir „Prijungti“. CLIProxyAPI iškeičia kodą į raktą ir įrašo paskyrą į
 `auth/`. SSH tunelio ir callback port'ų nereikia (CLIProxyAPI management OAuth be `is_webui`).
 
@@ -92,7 +93,11 @@ CLIProxyAPI pats Claude/Codex limitų nerenka. Kolektorius kas `QUOTA_REFRESH_MI
 per CLIProxyAPI `/requests/api-call` su paskyros raktu klausia tiekėjo:
 
 - Claude – `https://api.anthropic.com/api/oauth/usage` (`five_hour`, `seven_day`, `iguana_necktie` = 7 d. Fable);
-- Codex – `https://chatgpt.com/backend-api/wham/usage` (pirminis ir antrinis langas, sukaupti atstatymai).
+- Codex – `https://chatgpt.com/backend-api/wham/usage` (pirminis ir antrinis langas, sukaupti atstatymai);
+- Antigravity – `POST …/v1internal:fetchAvailableModels` (`daily-cloudcode-pa`, nepavykus – `cloudcode-pa`; su paskyros
+  `project_id`): kiekvieno modelio `quotaInfo.remainingFraction` ir `resetTime`. Langai – modelių šeimos: Gemini Pro,
+  Gemini Flash, Claude / GPT (šeimos panaudota dalis = labiausiai panaudoto jos modelio; be `remainingFraction` – 100 %;
+  image, lite ir Google vidiniai `chat_*`/`tab_*` neįeina). Apžvalgoje Antigravity eilutė tris stulpelius rodo šeimoms.
 
 Užklausų antraštėse jau yra `x-codex-*` ir `anthropic-ratelimit-unified-*` reikšmės (Claude `5h`, `7d`, `7d_oi` = Fable;
 trupmenos; Codex – `used-percent`, `window-minutes`, `reset-at` arba `reset-after-seconds`): usage įrašo `response_headers` iš
@@ -165,7 +170,8 @@ Theo savo fork'e maršrutizuoja į paskyrą, kurios limitas atsinaujina anksčia
 pirmiausia naudoja didžiausio `priority` paskyras, todėl įjungus (Nustatymai) kolektorius po kiekvieno limitų
 skaitymo kiekvienam tiekėjui sudeda prioritetus: anksčiausiai savaitinį limitą atnaujinanti – didžiausias,
 išnaudotos (5 val. ar 7 d. ≥ 99,5 %) – 0. Vykstančią sesiją session affinity palieka jos paskyroje. Įjungus rankiniai
-prioritetai perrašomi.
+prioritetai perrašomi – tik Claude ir Codex: Antigravity kvota yra modelių šeimos, ją CLIProxyAPI pats atvėsina
+modeliui, todėl jos prioritetai lieka tavo.
 
 ### Kolektorius
 
@@ -232,6 +238,25 @@ CLIProxyAPI request log'o rašymas srautui turi neblokuojančių kelių. Todėl 
 CLIProxyAPI atidavė; prieš CLIProxyAPI atnaujinimą verta paleisti `app:collect --duration=0`. CLIProxyAPI
 `upstream.codex.response-steering` (eksperimentinis duplex) turi likti išjungtas: su juo timeline nebeskaido WS
 turn'ų, todėl config.yaml redaktorius jo neleidžia.
+
+## Antigravity (Gemini)
+
+CLIProxyAPI turi `antigravity` tiekėją: Google paskyra (Antigravity OAuth) duoda Gemini modelius ir Google'o Claude /
+GPT-OSS kvotą. Paskyros → „+ Antigravity paskyra“. Modeliai pasiekiami tuo pačiu adresu ir raktu visais formatais
+(`/v1/messages`, `/v1/responses`, `/v1/chat/completions`, `/v1beta`); sąrašas –
+`curl -s http://127.0.0.1:8317/v1/models -H "Authorization: Bearer <raktas>" | jq -r '.data[] | select(.owned_by == "antigravity") | .id'`.
+Pvz. `claude --model gemini-4-argon-high` (per hub'ą). Žurnale tokios užklausos žymimos `antigravity` (pagal usage įrašą).
+
+- **Claude modelių vardų sankirta.** Antigravity siūlo ir kai kuriuos Claude modelius tais pačiais id kaip Claude
+  paskyros (`claude-sonnet-4-6`), o vienodam id CLIProxyAPI renkasi iš visų tiekėjų paskyrų pagal prioritetą – Claude
+  Code užklausa galėtų nueiti į Google paskyrą. Konfigūracijos bazė (`ConfigBaseline::antigravityExclusions`) kiekvieną
+  paleidimą sankirtos id įrašo į `oauth.excluded-models.antigravity`; sąrašas tik pildomas. Antigravity savi Claude id
+  (`claude-opus-4-6-thinking` ir pan.) lieka.
+- **Pati Antigravity programa** (įdiegta šiame kompiuteryje iš AUR `antigravity`, `/opt/Antigravity`) per hub'ą
+  nesijungia – ji naudoja savo Google prisijungimą; hub'ui jos nereikia.
+- **Rizika.** Google blokuoja paskyras, kurių Antigravity kvota naudojama ne per Antigravity (CLIProxyAPI tam turi
+  `oauth.providers.antigravity.tos-pause-window`, 403 `TOS_VIOLATION`). Prarasti galima Antigravity / Gemini prieigą,
+  blogiausiu atveju – ir pačią Google paskyrą, todėl prijunk **atskirą** Google paskyrą, ne pagrindinę.
 
 ## Įrankių nukreipimas į hub'ą
 

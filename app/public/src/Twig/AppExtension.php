@@ -2,6 +2,7 @@
 
 namespace App\Twig;
 
+use App\CliProxy\Providers;
 use App\Entity\Alert;
 use App\Quota\QuotaWindow;
 use App\Repository\AlertRepository;
@@ -96,6 +97,13 @@ class AppExtension
             $used >= 70 => 'warn',
             default => 'ok',
         };
+    }
+
+    /** A provider's name as a person reads it: claude → Claude. */
+    #[AsTwigFilter('provider_label')]
+    public function providerLabel(string $provider): string
+    {
+        return Providers::label($provider);
     }
 
     /** A limit window's name in the page's language; one the translations do not know keeps the label it was read with. */

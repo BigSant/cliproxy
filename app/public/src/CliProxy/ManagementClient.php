@@ -106,14 +106,17 @@ class ManagementClient
      * whatever the provider said; the provider's status and body come back inside.
      *
      * @param array<string, string> $headers
+     * @param ?string                $data    the request body, as sent
      *
      * @return array{status_code: int, body: string}
      */
-    public function providerCall(string $authIndex, string $method, string $url, array $headers): array
+    public function providerCall(string $authIndex, string $method, string $url, array $headers, ?string $data = null): array
     {
-        $result = $this->json('POST', '/requests/api-call', [
-            'auth_index' => $authIndex, 'method' => $method, 'url' => $url, 'header' => $headers,
-        ], timeout: 10);
+        $call = ['auth_index' => $authIndex, 'method' => $method, 'url' => $url, 'header' => $headers];
+        if (null !== $data) {
+            $call['data'] = $data;
+        }
+        $result = $this->json('POST', '/requests/api-call', $call, timeout: 10);
 
         return ['status_code' => (int) ($result['status_code'] ?? 0), 'body' => (string) ($result['body'] ?? '')];
     }
@@ -203,6 +206,24 @@ class ManagementClient
         }
 
         return ['url' => $result['url'], 'state' => $result['state']];
+    }
+
+    /**
+     * The model ids CLIProxyAPI serves through one credential (its registry, after exclusions).
+     *
+     * @return list<string>
+     */
+    public function credentialModels(string $name): array
+    {
+        $result = $this->json('GET', '/credentials/models', query: ['name' => $name]);
+        $ids = [];
+        foreach ((array) ($result['models'] ?? []) as $model) {
+            if (\is_array($model) && \is_string($model['id'] ?? null) && '' !== $model['id']) {
+                $ids[] = $model['id'];
+            }
+        }
+
+        return $ids;
     }
 
     /** Ends an account's cooldown in CLIProxyAPI (its own pause after 429s), not the provider's limit. */

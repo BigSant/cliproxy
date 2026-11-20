@@ -36,6 +36,9 @@ window:
     7d-fable: '7 d Fable'
     7d-opus: '7 d Opus'
     7d-sonnet: '7 d Sonnet'
+    ag-gemini: 'Gemini Pro'
+    ag-flash: 'Gemini Flash'
+    ag-claude: 'Claude / GPT'
 
 range:
     24h: '24 h'
@@ -446,6 +449,9 @@ connect:
     t3_double_html: '<strong>T3 Code: double usage records.</strong> If T3 Code shows usage twice, set <code>requires_openai_auth = true</code> under <code>[model_providers.cliproxy]</code>. That needs a local ChatGPT sign-in with the account that is in the hub; requests still go through the hub with this key.'
     t3_double_source: 'Source: a gist comment (mmmattG, CLIProxyAPI 8.0.45), not verified.'
     check: 'Check'
+    antigravity_models: 'Google account models'
+    antigravity_intro_html: 'Antigravity accounts (Accounts → “+ Antigravity account”) give the Gemini models and Google''s Claude / GPT-OSS quota at the same hub address and key: <code>/v1/messages</code> (Claude Code), <code>/v1/responses</code> and <code>/v1/chat/completions</code>, <code>/v1beta</code> (Gemini). Take the model name from the list – it changes.'
+    antigravity_note_html: '<strong>The Antigravity app itself cannot go through the hub</strong> – it uses its own Google sign-in. Claude models the Claude accounts have too (e.g. <code>claude-sonnet-4-6</code>) are switched off for Antigravity accounts automatically (<code>oauth.excluded-models.antigravity</code>), so a Claude Code request never lands on a Google account. The Gemini CLI line is not verified.'
 
 alerts:
     open_count: '%count% open'

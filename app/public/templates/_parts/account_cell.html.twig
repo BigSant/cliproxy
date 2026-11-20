@@ -1,6 +1,6 @@
 {% set account = row.account %}
 <div class="account-cell">
-    <span class="provider provider-{{ account.provider }}">{{ account.provider == 'claude' ? 'Claude' : (account.provider == 'codex' ? 'Codex' : account.provider) }}</span>
+    <span class="provider provider-{{ account.provider }}">{{ account.provider|provider_label }}</span>
     <div>
         <div class="account-name email">{{ account.label }}</div>
         <div class="account-meta">

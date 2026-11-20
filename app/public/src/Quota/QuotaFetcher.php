@@ -17,6 +17,13 @@ class QuotaFetcher
 {
     public const string CLAUDE_USAGE_URL = 'https://api.anthropic.com/api/oauth/usage';
     public const string CODEX_USAGE_URL = 'https://chatgpt.com/backend-api/wham/usage';
+    /** Antigravity's model catalog carries each model's quota; CLIProxyAPI asks the daily endpoint first, as here. */
+    public const array ANTIGRAVITY_MODELS_URLS = [
+        'https://daily-cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels',
+        'https://cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels',
+    ];
+    /** The Antigravity desktop app, as CLIProxyAPI presents it (misc.AntigravityUserAgent). */
+    private const string ANTIGRAVITY_USER_AGENT = 'antigravity/hub/2.33.0 (aidev_client; os_type=darwin; arch=arm64)';
 
     private const array CLAUDE_WINDOWS = [
         'five_hour' => [QuotaWindow::FIVE_HOUR, '5 val.'],
@@ -41,6 +48,7 @@ class QuotaFetcher
             $snapshot = match (true) {
                 $account->isClaude() => $this->claude($account, $userAgent),
                 $account->isCodex() => $this->codex($account, $userAgent),
+                $account->isAntigravity() => $this->antigravity($account),
                 default => null,
             };
             if (null !== $snapshot) {
@@ -89,14 +97,39 @@ class QuotaFetcher
             null !== $banked ? (int) $banked : null);
     }
 
+    private function antigravity(Account $account): QuotaSnapshot
+    {
+        $headers = [
+            'Authorization' => 'Bearer $TOKEN$',
+            'Content-Type' => 'application/json',
+            'User-Agent' => self::ANTIGRAVITY_USER_AGENT,
+        ];
+        $data = (string) json_encode(null !== $account->projectId ? ['project' => $account->projectId] : new \stdClass());
+        $body = null;
+        foreach (self::ANTIGRAVITY_MODELS_URLS as $index => $url) {
+            try {
+                $body = $this->call($account, $url, $headers, 'POST', $data);
+                break;
+            } catch (\UnexpectedValueException $exception) {
+                // The production endpoint is the fallback; its failure is the one told.
+                if ($index === \count(self::ANTIGRAVITY_MODELS_URLS) - 1) {
+                    throw $exception;
+                }
+            }
+        }
+
+        return new QuotaSnapshot($account->authIndex, $account->label(), $account->provider, $this->clock->now(),
+            self::antigravityWindows((array) $body), 'live', $account->planType);
+    }
+
     /**
      * @param array<string, string> $headers
      *
      * @return array<string, mixed>
      */
-    private function call(Account $account, string $url, array $headers): array
+    private function call(Account $account, string $url, array $headers, string $method = 'GET', ?string $data = null): array
     {
-        $answer = $this->client->providerCall($account->authIndex, 'GET', $url, $headers);
+        $answer = $this->client->providerCall($account->authIndex, $method, $url, $headers, $data);
         if (200 !== $answer['status_code']) {
             throw new \UnexpectedValueException(\sprintf('Provider answered %d', $answer['status_code']));
         }
@@ -148,6 +181,50 @@ class QuotaFetcher
             };
             $windows[] = new QuotaWindow($key, QuotaWindow::FIVE_HOUR === $key ? '5 val.' : '7 d.',
                 (float) $window['used_percent'], self::instant($window['reset_at'] ?? null));
+        }
+
+        return $windows;
+    }
+
+    /**
+     * Antigravity keeps a quota per model family, each with its own reset; one window per family, as used as its most
+     * used model (a family shares one pool, so they agree). A model whose quota is gone has a reset but no remaining
+     * fraction. Image, lite and Google's internal models (chat_*, tab_*) have pools of their own and stay out.
+     *
+     * @param array<string, mixed> $body fetchAvailableModels: {models: {<id>: {quotaInfo: {remainingFraction, resetTime}}}}
+     *
+     * @return list<QuotaWindow>
+     */
+    public static function antigravityWindows(array $body): array
+    {
+        $families = [];
+        foreach ((array) ($body['models'] ?? []) as $id => $model) {
+            $id = strtolower((string) $id);
+            $quota = \is_array($model) ? ($model['quotaInfo'] ?? null) : null;
+            if (!\is_array($quota) || str_contains($id, 'image') || str_contains($id, 'lite')) {
+                continue;
+            }
+            $key = match (true) {
+                str_starts_with($id, 'claude-') || str_starts_with($id, 'gpt-') => QuotaWindow::AG_CLAUDE,
+                str_starts_with($id, 'gemini-') && str_contains($id, 'flash') => QuotaWindow::AG_FLASH,
+                str_starts_with($id, 'gemini-') => QuotaWindow::AG_GEMINI,
+                default => null,
+            };
+            $remaining = $quota['remainingFraction'] ?? null;
+            $reset = self::instant($quota['resetTime'] ?? null);
+            if (null === $key || (!is_numeric($remaining) && null === $reset)) {
+                continue;
+            }
+            $used = is_numeric($remaining) ? max(0.0, min(100.0, (1 - (float) $remaining) * 100)) : 100.0;
+            if (!isset($families[$key]) || $used > $families[$key][0]) {
+                $families[$key] = [$used, $reset];
+            }
+        }
+        $windows = [];
+        foreach (QuotaWindow::ANTIGRAVITY as $key => $label) {
+            if (isset($families[$key])) {
+                $windows[] = new QuotaWindow($key, $label, round($families[$key][0], 2), $families[$key][1]);
+            }
         }
 
         return $windows;

@@ -4,6 +4,7 @@ namespace App\Controller;
 
 use App\CliProxy\ManagementClient;
 use App\CliProxy\ManagementException;
+use App\CliProxy\Providers;
 use App\Repository\QuotaSnapshotRepository;
 use App\Settings\Settings;
 use App\View\AccountRows;
@@ -17,14 +18,14 @@ use Symfony\Component\Routing\Attribute\Route;
 use Symfony\Contracts\Translation\TranslatorInterface;
 
 /**
- * Paskyros: sign Claude and Codex accounts in, take them out of rotation, set their routing fields, remove them.
+ * Paskyros: sign Claude, Codex and Antigravity accounts in, take them out of rotation, set their routing fields, remove them.
  * A login is CLIProxyAPI's headless OAuth: the person opens the provider's page in their own browser, and pastes
  * back the localhost address it ends on (that page does not load, which is expected); no SSH tunnel is needed.
  */
 #[Route('/accounts')]
 class AccountController extends AbstractController
 {
-    public const array PROVIDERS = ['claude' => 'Claude', 'codex' => 'Codex'];
+    public const array PROVIDERS = Providers::LABELS;
     private const string LOGIN = 'account_login';
 
     public function __construct(
