@@ -121,6 +121,11 @@ class DashboardTest extends WebTestCase
         self::assertStringContainsString('Gemini Pro', $row->text());
         self::assertSame(['25%', '0%', '100%'], $row->filter('.quota-value')->each(fn ($n) => $n->text()));
 
+        $quota = $this->browser->request('GET', '/quota');
+        self::assertResponseIsSuccessful();
+        self::assertContains('Antigravity', $quota->filter('.pool-title')->each(fn ($n) => trim(explode(' ', trim($n->text()))[0])), 'a pool card of its own');
+        self::assertStringContainsString('Gemini Pro', $quota->filter('.pool-title')->reduce(fn ($n) => str_contains($n->text(), 'Antigravity'))->text());
+
         $this->browser->request('GET', '/accounts');
         self::assertSelectorTextContains('.provider-buttons', 'Antigravity');
         $this->browser->request('GET', '/connect');
