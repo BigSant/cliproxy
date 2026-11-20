@@ -84,7 +84,8 @@ class FakeCliProxy
             'POST /oauth/callback' => $this->json(['status' => 'ok']),
             'GET /oauth/status' => $this->json(['status' => $this->loginStatus] + ('ok' === $this->loginStatus ? ['auth_id' => 'claude-new.json'] : ['error' => 'Bad request'])),
             'GET /config' => new MockResponse(json_encode($this->config), ['response_headers' => ['content-type' => 'application/json', 'x-cpa-version' => $this->version]]),
-            'PATCH /config' => $this->patchConfig($body),
+            // CLIProxyAPI v8.0.80 reads the body as YAML, which has no "\/" escape.
+            'PATCH /config' => str_contains((string) ($options['body'] ?? ''), '\\/') ? new MockResponse('{"error":"invalid_body"}', ['http_code' => 400]) : $this->patchConfig($body),
             'GET /config.yaml' => new MockResponse($this->yaml(), ['response_headers' => ['etag' => '"'.sha1($this->yaml()).'"']]),
             'PUT /config.yaml' => $this->putYaml($options),
             'POST /routing/cooldown/reset' => $this->json(['status' => 'ok']),

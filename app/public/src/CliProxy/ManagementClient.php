@@ -267,7 +267,10 @@ class ManagementClient
             'timeout' => $timeout,
         ];
         if (null !== $json) {
-            $options['json'] = $json;
+            // Encoded here, not by the http client: its "\/" escape breaks CLIProxyAPI v8.0.80's config PATCH, which
+            // reads the body as YAML (400 invalid_body for a user-agent such as claude-cli/2.1.311).
+            $options['body'] = json_encode($json, \JSON_UNESCAPED_SLASHES | \JSON_UNESCAPED_UNICODE | \JSON_PRESERVE_ZERO_FRACTION | \JSON_THROW_ON_ERROR);
+            $options['headers']['Content-Type'] ??= 'application/json';
         }
         if (null !== $body) {
             $options['body'] = $body;
