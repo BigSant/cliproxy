@@ -70,4 +70,17 @@ class ConfigBaselineTest extends TestCase
         self::assertNull(ConfigBaseline::shadowedByAntigravity(['Claude-Sonnet-4-6'], $claude, $antigravity), 'already excluded');
         self::assertNull(ConfigBaseline::shadowedByAntigravity([], $claude, ['gemini-4-argon-high']));
     }
+
+    public function testAntigravityGetsTheModelNamesItsOwnClientsUseOnceAndThePersonsAliasStays(): void
+    {
+        $all = ConfigBaseline::antigravityAliases([]);
+        self::assertCount(\count(ConfigBaseline::ANTIGRAVITY_ALIASES), $all);
+        self::assertSame(['name' => 'gemini-4-neon-xhigh', 'alias' => 'gemini-4-neon', 'fork' => true, 'force-mapping' => true], $all[0]);
+        self::assertNull(ConfigBaseline::antigravityAliases($all), 'all there');
+
+        $own = ['name' => 'gemini-4-neon-high', 'alias' => 'gemini-4-neon'];
+        $merged = ConfigBaseline::antigravityAliases([$own]);
+        self::assertSame($own, $merged[0], 'the person\'s alias stays first and is not doubled');
+        self::assertNotContains('gemini-4-neon-xhigh', array_column($merged, 'name'));
+    }
 }

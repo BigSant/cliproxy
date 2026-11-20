@@ -2,6 +2,7 @@
 
 namespace App\Tests\Functional;
 
+use App\CliProxy\ConfigBaseline;
 use App\Entity\UsageRecord;
 use App\Quota\QuotaFetcher;
 use App\Tests\Support\Database;
@@ -108,6 +109,7 @@ class DashboardTest extends WebTestCase
         $call = array_values(array_filter($this->cliProxy->calls, static fn ($c) => 'POST /requests/api-call' === $c['method'].' '.$c['path'] && QuotaFetcher::ANTIGRAVITY_MODELS_URLS[0] === $c['body']['url']))[0];
         self::assertSame(['POST', '{"project":"proj-1"}'], [$call['body']['method'], $call['body']['data']]);
         self::assertSame(['claude-sonnet-4-6'], $this->cliProxy->config['oauth']['excluded-models']['antigravity']);
+        self::assertSame(array_keys(ConfigBaseline::ANTIGRAVITY_ALIASES), array_column($this->cliProxy->config['oauth']['model-alias']['antigravity'], 'alias'));
         $patched = array_column(array_filter($this->cliProxy->calls, static fn ($c) => 'PATCH /credentials/fields' === $c['method'].' '.$c['path']), 'body');
         self::assertNotSame([], $patched, 'soonest-reset-first ran');
         self::assertSame([], array_filter($patched, static fn ($b) => 'antigravity-me@gmail.com.json' === ($b['name'] ?? null)), 'and left Antigravity alone');
