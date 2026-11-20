@@ -34,11 +34,7 @@ Symfony 8.1 skydelis.
 - **Konfigūracijos bazė** (`src/CliProxy/ConfigBaseline.php`): kadangi šablonas esamo failo nebepasiekia, kolektorius
   kiekvieną paleidimą per management API užtikrina duomenų politiką (`usage-statistics-enabled`, eilės 1 h,
   `logs-max-total-size-mb: 0`, `error-logs-max-files: 0`), o vieną kartą – `session-affinity-rebind-on: quota` ir
-  `upstream.claude.model-level-cooling: true` (toliau – tavo pasirinkimas). Be to, Claude Code versiją, kuria
-  CLIProxyAPI prisistato Anthropic'ui (`upstream.claude.header-defaults.user-agent`), ji laiko ne žemesnę už naujausią
-  klientą iš `usage_record` (paskutinės 2000 Claude užklausų): CLIProxyAPI numatytoji – jo paskutinė išmatuota (v8.0.62 –
-  2.1.280), o Anthropic naujiems modeliams reikalauja naujesnės („Claude Code 2.1.280 does not support this model“).
-  Tik kelia, niekada nemažina; Nustatymai → Claude Code versija rodo, kas siunčiama.
+  `upstream.claude.model-level-cooling: true` (toliau – tavo pasirinkimas).
 - **`CLIPROXY_CONFIG_REV`** (`env/common.env`) – `entrypoint.sh` maiša; ji yra konteinerio aplinkoje, todėl pakeitus
   `entrypoint.sh` deploy'us konteinerį perkuria. Šablonas į maišą neįeina: jis veikia tik tuščią katalogą, o be reikalo
   perkurtas CLIProxyAPI nutrauktų vykstančias sesijas. CI (`checks.yml`, lint) atmeta pasenusią reikšmę.
@@ -325,9 +321,20 @@ hybrid-sleep.target`), kaip reikalauja Theo gidas; atšaukti – `systemctl unma
 
 ### CLIProxyAPI atnaujinimas
 
-Nauja Claude Code ar Codex versija dažnai veikia tik su nauja CLIProxyAPI, todėl hub'as ją ima pats:
+Nauja Claude Code ar Codex versija dažnai veikia tik su nauja CLIProxyAPI, todėl hub'as ją ima pats. Hub'o cron'as
+(`app:cliproxy-update`, kas 10 min., `cliproxy-<env>-cron`) kiekvieną kartą daro dvi atskiras dalis:
 
-1. Hub'o cron'as (`app:cliproxy-update`, kas 10 min., `cliproxy-<env>-cron`) klausia GitHub
+**Klientų versijos.** Užklausas, kurių CLIProxyAPI neperleidžia kaip paties kliento, jis siunčia savo įrašytomis
+versijomis (v8.0.62 – Claude Code 2.1.280), o Anthropic naujų modelių senoms Claude Code versijoms neduoda („Claude Code
+2.1.280 does not support this model“). Todėl cron'as paima naujausias npm versijas (`@anthropic-ai/claude-code`,
+`@openai/codex`) ir per management API įrašo jas į `upstream.claude.header-defaults.user-agent` ir
+`oauth.providers.codex.header-defaults.user-agent` (`src/CliProxy/Harnesses.php`). Tik kelia, niekada nemažina:
+ranka config.yaml įrašyta aukštesnė lieka. Nustatymai → „Klientų versijos“ rodo, kas siunčiama; nepavykus –
+įspėjimas `cliproxy:harness`. Kitos CLIProxyAPI pirštų atspaudo antraštės (SDK, Node versijos) lieka jo išmatuotos.
+
+**Pati CLIProxyAPI:**
+
+1. Cron'as klausia GitHub
    `router-for-me/CLIProxyAPI` naujausio release'o ir lygina su veikiančia versija. Kai Docker Hub'e atsiranda
    `eceasy/cli-proxy-api:<versija>`, jis paleidžia workflow'ą **CLIProxyAPI update** – vieną kartą kiekvienai
    versijai (`setting.cliproxy_update`); iš naujo bandoma tik tada, kai GitHub paleidimo nepriėmė.

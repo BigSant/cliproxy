@@ -35,6 +35,8 @@ class FakeCliProxy
     /** @var list<string> */
     public array $imageTags = ['v8.0.61'];
     public int $dispatchStatus = 204;
+    /** @var array<string, string> npm's latest version by package */
+    public array $npm = ['@anthropic-ai/claude-code' => '2.1.321', '@openai/codex' => '0.167.0'];
     /** Every management call refused, as with a wrong key (CLIProxyAPI still names its version). */
     public bool $rejectAll = false;
     public bool $verified = true;
@@ -51,6 +53,11 @@ class FakeCliProxy
             }
             if (str_starts_with($url, \App\CliProxy\Releases::IMAGE_TAG_URL)) {
                 return new MockResponse('{}', ['http_code' => \in_array(rawurldecode(substr($url, \strlen(\App\CliProxy\Releases::IMAGE_TAG_URL))), $this->imageTags, true) ? 200 : 404]);
+            }
+            if (str_starts_with($url, 'https://registry.npmjs.org/')) {
+                $package = substr($url, \strlen('https://registry.npmjs.org/'), -\strlen('/latest'));
+
+                return isset($this->npm[$package]) ? $this->json(['name' => $package, 'version' => $this->npm[$package]]) : new MockResponse('{}', ['http_code' => 404]);
             }
             if (str_ends_with($url, '/dispatches')) {
                 return new MockResponse(204 === $this->dispatchStatus ? '' : '{"message":"Bad credentials"}', ['http_code' => $this->dispatchStatus]);

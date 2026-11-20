@@ -40,23 +40,6 @@ class CollectorTest extends KernelTestCase
         self::assertSame(501, $this->entityManager->getRepository(UsageRecord::class)->count([]));
     }
 
-    public function testCliProxyPresentsTheNewestClaudeCodeTheClientsRun(): void
-    {
-        $record = static fn (string $id, string $agent) => ['timestamp' => '2026-11-09T12:00:00Z', 'request_id' => $id, 'provider' => 'claude', 'user_agent' => $agent, 'tokens' => ['total_tokens' => 5]];
-        $this->cliProxy->queue = [$record('r1', 'claude-cli/2.1.311 (external, cli)'), $record('r2', 'claude-cli/2.1.300 (external, sdk-ts)'), $record('r3', 'codex_cli_rs/0.149.1')];
-        self::getContainer()->get(Collector::class)->collectUsage();
-        $baseline = self::getContainer()->get(\App\CliProxy\ConfigBaseline::class);
-
-        $baseline->apply();
-        self::assertSame('claude-cli/2.1.311 (external, cli)', $this->cliProxy->config['upstream']['claude']['header-defaults']['user-agent']);
-
-        // An older client later does not take it back down.
-        $this->cliProxy->queue = [$record('r4', 'claude-cli/2.1.290 (external, cli)')];
-        self::getContainer()->get(Collector::class)->collectUsage();
-        self::assertFalse($baseline->apply());
-        self::assertSame('claude-cli/2.1.311 (external, cli)', $this->cliProxy->config['upstream']['claude']['header-defaults']['user-agent']);
-    }
-
     public function testLimitsAreReadPerAccountAndPrioritiesFollowTheWeeklyReset(): void
     {
         $this->cliProxy->credentials = [

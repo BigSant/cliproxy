@@ -15,6 +15,8 @@ class Releases
     public const string LATEST_URL = 'https://api.github.com/repos/router-for-me/CLIProxyAPI/releases/latest';
     public const string IMAGE_TAG_URL = 'https://hub.docker.com/v2/repositories/eceasy/cli-proxy-api/tags/';
     public const string WORKFLOW = 'cliproxy-update.yml';
+    /** npm's latest release of a package: {version, ...}. */
+    public const string NPM_LATEST_URL = 'https://registry.npmjs.org/%s/latest';
     private const string VERSION = '/^v\d+\.\d+\.\d+$/';
     private const array GITHUB_HEADERS = ['Accept' => 'application/vnd.github+json', 'X-GitHub-Api-Version' => '2022-11-28', 'User-Agent' => 'cliproxy-hub'];
 
@@ -43,6 +45,26 @@ class Releases
         }
 
         return $tag;
+    }
+
+    /**
+     * The newest release of every harness CLIProxyAPI presents (Harnesses), from npm.
+     *
+     * @return array<string, string> version by harness
+     */
+    public function harnessVersions(): array
+    {
+        $versions = [];
+        foreach (Harnesses::ALL as $harness => $definition) {
+            $release = $this->httpClient->request('GET', \sprintf(self::NPM_LATEST_URL, $definition['package']), ['headers' => ['Accept' => 'application/json'], 'timeout' => 10])->toArray();
+            $version = $release['version'] ?? null;
+            if (!\is_string($version) || !preg_match('/^\d+\.\d+\.\d+$/', $version)) {
+                throw new \RuntimeException("npm named no release version of {$definition['package']}");
+            }
+            $versions[$harness] = $version;
+        }
+
+        return $versions;
     }
 
     /** Whether eceasy/cli-proxy-api:<version> is on Docker Hub yet: it is pushed some minutes after the release. */

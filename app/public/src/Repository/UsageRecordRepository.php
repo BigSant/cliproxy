@@ -2,7 +2,6 @@
 
 namespace App\Repository;
 
-use App\CliProxy\ClaudeCodeVersion;
 use App\Entity\UsageRecord;
 use Doctrine\Bundle\DoctrineBundle\Repository\ServiceEntityRepository;
 use Doctrine\DBAL\Query\QueryBuilder;
@@ -180,33 +179,6 @@ class UsageRecordRepository extends ServiceEntityRepository
         }
 
         return $agents;
-    }
-
-    /**
-     * The newest Claude Code version among the latest Claude requests (X.Y.Z of claude-cli/X.Y.Z): what the people's
-     * clients run now.
-     */
-    public function newestClaudeCodeVersion(int $records = 2000): ?string
-    {
-        $agents = $this->getEntityManager()->getConnection()->createQueryBuilder()
-            ->select('user_agent')
-            ->from('usage_record')
-            ->where('provider = :provider')
-            ->andWhere('user_agent LIKE :prefix')
-            ->setParameter('provider', 'claude')
-            ->setParameter('prefix', 'claude-cli/%')
-            ->orderBy('id', 'DESC')
-            ->setMaxResults($records)
-            ->fetchFirstColumn();
-        $newest = null;
-        foreach (array_unique($agents) as $agent) {
-            $version = ClaudeCodeVersion::of((string) $agent);
-            if (null !== $version && (null === $newest || version_compare($version, $newest, '>'))) {
-                $newest = $version;
-            }
-        }
-
-        return $newest;
     }
 
     /**

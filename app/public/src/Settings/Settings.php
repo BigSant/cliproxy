@@ -23,6 +23,9 @@ class Settings
     public const string CLIPROXY_LATEST_CHECKED_AT = 'cliproxy_latest_checked_at';
     /** The update to the newest release: {version, state (CliProxyUpdateCommand), at, error?}. */
     public const string CLIPROXY_UPDATE = 'cliproxy_update';
+    /** The harnesses' newest npm releases (version by harness), and the last error bringing CLIProxyAPI up to them. */
+    public const string HARNESS_LATEST = 'harness_latest';
+    public const string HARNESS_ERROR = 'harness_error';
     /** The configuration baseline applied once (ConfigBaseline::ONCE). */
     public const string CONFIG_BASELINE = 'config_baseline';
     /** The collector's hourly replay of today's and yesterday's spool. */

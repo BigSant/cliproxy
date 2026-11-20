@@ -99,7 +99,7 @@ class CliProxyUpdateTest extends KernelTestCase
         $this->cliProxy->release = 'v8.0.62';
         $this->cliProxy->imageTags[] = 'v8.0.62';
         $releases = new Releases(self::getContainer()->get('http_client'), '', 'BigSant/cliproxy');
-        $command = new CliProxyUpdateCommand($releases, $this->settings, self::getContainer()->get(\Psr\Clock\ClockInterface::class));
+        $command = new CliProxyUpdateCommand($releases, $this->settings, self::getContainer()->get(\Psr\Clock\ClockInterface::class), self::getContainer()->get(\App\CliProxy\ManagementClient::class));
         $application = new Application(self::$kernel);
         $application->addCommand($command);
         (new CommandTester($application->find('app:cliproxy-update')))->execute([]);
@@ -107,6 +107,37 @@ class CliProxyUpdateTest extends KernelTestCase
 
         self::assertSame([], $this->dispatches());
         self::assertSame(['update', Alert::WARNING], $this->alert());
+    }
+
+    public function testCliProxyPresentsTheNewestClaudeCodeAndCodexOnNpm(): void
+    {
+        $this->update();
+        self::assertSame('claude-cli/2.1.321 (external, cli)', $this->cliProxy->config['upstream']['claude']['header-defaults']['user-agent']);
+        self::assertStringStartsWith('codex-tui/0.167.0 ', $this->cliProxy->config['oauth']['providers']['codex']['header-defaults']['user-agent']);
+        self::assertSame(['claude' => '2.1.321', 'codex' => '0.167.0'], $this->settings->get(Settings::HARNESS_LATEST));
+
+        // The next Claude Code release is taken on the next run; a higher value set by hand stays.
+        $this->cliProxy->npm['@anthropic-ai/claude-code'] = '2.1.330';
+        $this->cliProxy->config['oauth']['providers']['codex']['header-defaults']['user-agent'] = 'codex-tui/0.200.0';
+        $this->update();
+        self::assertSame('claude-cli/2.1.330 (external, cli)', $this->cliProxy->config['upstream']['claude']['header-defaults']['user-agent']);
+        self::assertSame('codex-tui/0.200.0', $this->cliProxy->config['oauth']['providers']['codex']['header-defaults']['user-agent']);
+    }
+
+    public function testAHarnessCheckThatFailsIsAnAlertAndTheReleaseCheckGoesOn(): void
+    {
+        unset($this->cliProxy->npm['@openai/codex']);
+        $this->cliProxy->release = 'v8.0.62';
+        $this->cliProxy->imageTags[] = 'v8.0.62';
+
+        self::assertSame(Command::FAILURE, $this->update());
+        self::assertCount(1, $this->dispatches());
+        $alert = self::getContainer()->get(EntityManagerInterface::class)->getRepository(Alert::class)->findOneBy(['alertKey' => 'cliproxy:harness', 'resolvedAt' => null]);
+        self::assertSame(Alert::WARNING, $alert?->level);
+
+        $this->cliProxy->npm['@openai/codex'] = '0.167.0';
+        self::assertSame(Command::SUCCESS, $this->update());
+        self::assertNull(self::getContainer()->get(EntityManagerInterface::class)->getRepository(Alert::class)->findOneBy(['alertKey' => 'cliproxy:harness', 'resolvedAt' => null]));
     }
 
     public function testNothingHappensWhileTheNewestRuns(): void

@@ -225,6 +225,10 @@ class CollectCommand
         if (\is_string($version) && \is_string($latest) && version_compare(ltrim($latest, 'v'), ltrim($version, 'v'), '>')) {
             $conditions['cliproxy:update'] = $this->updateCondition($version, $latest);
         }
+        $harnessError = $this->settings->get(Settings::HARNESS_ERROR);
+        if (\is_string($harnessError) && '' !== $harnessError) {
+            $conditions['cliproxy:harness'] = ['level' => Alert::WARNING, 'key' => 'alert.harness_failed', 'params' => ['%error%' => $harnessError]];
+        }
         $this->alerts->sync($conditions);
     }
 
